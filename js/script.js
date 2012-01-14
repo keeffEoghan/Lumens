@@ -120,7 +120,7 @@
 		function Enum() {
 			for(var i = 0; i < arguments.length; ++i) { this[arguments[i]] = i; }
 		}
-		
+
 		/* Quad Tree implementation based on Mike Chambers' - http://www.mikechambers.com/blog/2011/03/21/javascript-quadtree-implementation/ */
 		/*
 		The MIT License
@@ -388,6 +388,37 @@
 
 				return { h: Math.floor(h*360), s: Math.floor(s*100),
 					l: Math.floor(l*100), a: this.a };
+			}
+		});
+
+		// For touchscreen devices
+		function Thumbstick(radius, unit) {
+			if(!radius) { $.error("Thumbstick error: cannot have zero radius"); }
+			this.rad = radius;
+			this.unit = unit;
+			this.center = null;	// Vector2D
+			this.pos = null;	// Vector2D
+		}
+		$.extend(Thumbstick.prototype, {
+			place: function(v) {
+				this.center = v.copy(); this.pos = v.copy(); return this;
+			},
+			move: function(v) {
+				this.pos = v;
+
+				var vector = this.vector();
+				if(this.unit || vector.magSq() > this.rad*this.rad) {
+					// Pin to range
+					this.pos = vector.doUnit().doScale(this.rad)
+						.doAdd(this.center);	// Makes relative vector absolute
+				}
+
+				return this;
+			},
+			lift: function(v) { this.pos = this.center = null; return this; },
+			vector: function() {
+				if(!this.rad) { $.error("Thumbstick error: cannot have zero radius"); }
+				return this.pos.sub(this.center).doScale(1/this.rad);
 			}
 		});
 	// }
@@ -774,145 +805,257 @@
 		function Controller(lumens) {
 			this.lumens = lumens;
 
-			this.commands = {
-				move: new Watchable(new Vector2D()),
-				aim: new Watchable(new Vector2D()),
+			this.events = {
+				move: new Watchable(false),	// Vector2D between 0 and 1, or null
+				aim: new Watchable(false),	// Unit Vector2D, or null
 				attack: new Watchable(false),
-				beam: new Watchable(),
-				repel: new Watchable(),
-				range: new Watchable(),
-				pause: new Watchable()
+				beam: new Watchable(false),
+				repel: new Watchable(false),
+				range: new Watchable(false),
+				pause: new Watchable(false)
 			};
-
-			this.bindEvents();
 		}
 		$.extend(Controller.prototype, {
-			bindEvents: ((Modernizr.touch)?
-					function() {
-						this.aimPos = null;
+			eventPos: function(e) {
+				var $viewport = this.lumens.$viewport, viewport = $viewport[0],
+					offset = $viewport.offset();
+				
+				/* Note: the canvas element's dimensions are not the same as its context's dimensions */
+				return new Vector2D(
+					(e.pageX-offset.left)/$viewport.width()*viewport.width,
+					(e.pageY-offset.top)/$viewport.height()*viewport.height);
+			}
+		});
+		// Factory method
+		Controller.make = function(lumens) {
+			return ((Modernizr.touch)?
+				new TouchController(lumens) : new MKController(lumens));
+		};
 
-						var $viewport = this.lumens.$viewport;
+		// Mouse/keyboard
+		function MKController(lumens) {
+			Controller.call(this, lumens);
+			
+			this.mousePos = null;	// Vector2D or null
 
-						$viewport.unbind('touchstart.lumens')
-						.bind('touchstart.lumens', function(event) {
-							/* Prevents scrolling */
-							event.preventDefault();
-							
-							/* jQuery normalises (and alters) event properties (http://stackoverflow.com/questions/3183872/does-jquery-preserve-touch-events-properties),
-								so we need to work with the original to access the touches arrays */
-							var e = event.originalEvent,
-								offset = $viewport.offset();
-							
-							for(var t = 0; t < e.changedTouches.length; ++t) {
-								var touch = e.changedTouches[t],
-									/* Note: the canvas element's dimensions are not the same as its context's dimensions  */
-									x = (touch.pageX-offset.left)/$viewport.width()*this.width,
-									y = (touch.pageY-offset.top)/$viewport.height()*this.height;
-							}
-							
-							$viewport.bind('touchmove.draw', function(event) {
-								event.preventDefault();
-								
-								var e = event.originalEvent,
-									offset = $this.offset(),
-									lines = draw.data.items[draw.data.items.length-1].lines,
-									scale = viewer.transform().scale;
-								
-								for(var i = e.changedTouches.length-1; i >= 0; i--) {
-									var touch = e.changedTouches[i],
-										/* Get the line at the start of the range of most recent lines */
-										line = lines[lines.length-1-(e.changedTouches.length-1-i)],
-										
-										x = ((draw.mode === 'vertical')?
-											line.points[0].x : (touch.pageX-offset.left)/scale/$this.width()*this.width),
-										y = ((draw.mode === 'horizontal')?
-											line.points[0].y : (touch.pageY-offset.top)/scale/$this.height()*this.height)
-									
-									/* Draw */
-									draw.drawSegment(x,y,e.timeStamp,line);
-								}
-							});
-							
-							$(document).bind('touchend.draw', function(event) {
-								event.preventDefault();
-								
-								var e = event.originalEvent;
-								
-								if(!e.touches.length) {
-									draw.save(function() { draw.draw(); })
-									.$canvas.unbind('touchmove.draw');
-									
-									$(document).unbind('touchend.draw');
-								}
-							});
-						});
+			// Bind events
+			var $viewport = this.lumens.$viewport;
+
+			/* By default, any input acts on the game
+				If other elements are on the page, then they must catch and
+				stop propogation of events meant for them
+				Pausing the game relinquishes global listening */
+			$(document).on(this.handlers);
+		}
+		$.extend(MKController.prototype, Controller.prototype, {
+			handlers: {
+				'mousedown.lumens': function(e) { this.events.attack.thing(true); },
+				'mouseup.lumens': function(e) { this.events.attack.thing(false); },
+				'mousemove.lumens': function(e) {
+					this.mousePos = this.eventPos(e);
+					this.events.aim.thing(this.mousePos.sub(this.lumens.player.pos)
+						.doUnit());
+				},
+				'keydown.lumens': function(e) {
+					switch(e.which) {
+					/* TODO: decide whether l, u, r, d moves player and
+						mouse/other keys aim (like twin-stick, but need
+						option to flip sides for lefties), or if u, d
+						move player and mouse/l, r aim (like a car)
+					// left, a, j
+					case 37: case 65: case 74:
+						this.mousePos = null;
+						this.events.aim.thing(/* TODO: rotation */);
+					break;
+					
+					// right, d, l
+					case 39: case 68: case 76:
+					break;
+					
+					// up, w, i
+					case 38: case 87: case 73:
+					break;
+					
+					// down, s, k
+					case 40: case 83: case 75:
+					break;
+					
+					// space
+					case 32: break;
+					
+					// x, m
+					case 88: case 77: break;
+					
+					// c, n
+					case 67: case 78: break;
+					
+					// v, b
+					case 86: case 66: break;
+					
+					// p, g, enter
+					case 80: case 71: case 13: break;
+					
+					default: break;
 					}
-				:	function() {
-						this.aimPos = null;
+				},
+				'keyup.lumens': function(e) {
+					switch(e.which) {
+					// left, a, j
+					case 37: case 65: case 74: break;
+					
+					// right, d, l
+					case 39: case 68: case 76: break;
+					
+					// up, w, i
+					case 38: case 87: case 73: break;
+					
+					// down, s, k
+					case 40: case 83: break;
+					
+					// space
+					case 32: break;
+					
+					// x, m
+					case 88: case 77: break;
+					
+					// c, n
+					case 67: case 78: break;
+					
+					// v, b
+					case 86: case 66: break;
+					
+					// p, g, enter
+					case 80: case 71: case 13: break;
+					
+					default: break;
+					}
+				}
+			}
+		});
 
-						var $viewport = this.lumens.$viewport;
+		function TouchController(lumens) {
+			Controller.call(this, lumens);
+			
+			this.move = new Thumbstick(50);
+			this.aim = new Thumbstick(50, true);
 
-						/* By default, any input acts on the game - if other
-							elements are on the page, then they must catch and
-							stop propogation of events meant for them */
-						$(document).bind({
-							'mousedown.lumens': function(e) {
-								this.commands.attack.thing(true);
-							},
-							'mouseup.lumens': function(e) {
-								this.commands.attack.thing(false);
-							},
-							'mousemove.lumens': function(e) {
-								var offset = draw.$canvas.offset(),
-									scale = viewer.transform().scale,
-									lines = draw.data.items[draw.data.items.length-1].lines,
-									line = lines[lines.length-1],
-									x = ((draw.mode === 'vertical')?
-											line.points[0].x
-										:	((e.pageX-offset.left)/scale/draw.$canvas.width()*draw.$canvas[0].width)),
-									y = ((draw.mode === 'horizontal')?
-											line.points[0].y
-										:	((e.pageY-offset.top)/scale/draw.$canvas.height()*draw.$canvas[0].height));
+			this.bindings = [];	// { touch, event }
 
-								var aimPos = new Vector2D(e.offsetX);
-								this.commands.aim.thing();
-							},
-							'keydown.lumens': function(e) {
-								switch(e.which) {
-								case 38: case 87: break;
-								
-								case 37: case 65: break;
-								
-								case 39: case 68: break;
-								
-								case 40: case 83: break;
-								
-								case 32: break;
-								
-								case 80: break;
-								
-								default: break;
-								}
-							},
-							'keyup.lumens': function(e) {
-								switch(e.which) {
-								case 38: case 87: break;
-								
-								case 37: case 65: break;
-								
-								case 39: case 68: break;
-								
-								case 40: case 83: break;
-								
-								case 32: break;
-								
-								case 80: break;
-								
-								default: break;
-								}
+			// Bind events
+			this.lumens.$viewport.off('.lumens').on(this.handlers);
+		}
+		$.extend(TouchController.prototype, Controller.prototype, {
+			handlers: {
+				'touchstart.lumens': function(event) {
+					/* Prevents scrolling */
+					event.preventDefault();
+					
+					/* jQuery normalises (and alters) event properties (http://stackoverflow.com/questions/3183872/does-jquery-preserve-touch-events-properties),
+						so we need to work with the original to access the touches arrays */
+					var e = event.originalEvent;
+					
+					for(var t = 0; this.touches.length < 4 &&
+					t < e.changedTouches.length; ++t) {
+						var touch = e.changedTouches[t],
+							touchPos = this.eventPos(touch);
+
+						// Place thumbsticks
+						if(!this.move.center) {
+							this.move.place(touchPos);
+							this.bindings.push({ touch: touch,
+								event: this.events.move });
+						}
+						else if(!this.aim.center) {
+							this.aim.place(touchPos);
+							this.bindings.push({ touch: touch,
+								event: this.events.aim });
+						}
+
+						// Activate enhanced modes
+						else if(!this.events.range.thing() &&
+						!this.events.repel.thing()) {
+							var moveDistSq = touchPos.distSq(this.move.center),
+								aimDistSq = touchPos.distSq(this.aim.center);
+							
+							if(moveDistSq < aimDistSq) {
+								this.bindings.push({ touch: touch,
+									event: this.events.range.thing(true) });
 							}
-						});
-					})
+							else {
+								this.bindings.push({ touch: touch,
+									event: this.events.repel.thing(true) });
+							}
+						}
+						else {
+							// 4th finger down - disable existing, enable beam
+							var b = this.bindingWithEvent((this.events.range.thing())?
+										this.events.range.thing(false)
+									:	this.events.repel.thing(false));
+
+							this.bindings.splice(this.bindings.indexOf(b), 1,
+								{ touch: touch, event: this.events.beam.thing(true) });
+						}
+					}
+				},
+				'touchmove.lumens': function(event) {
+					event.preventDefault();
+					
+					var e = event.originalEvent;
+					
+					for(var t = 0; t < e.changedTouches.length; ++t) {
+						var touch = e.changedTouches[t],
+							binding = this.bindingWithTouch(touch);
+						
+						if(binding) {
+							var thumbstick = ((binding.event === this.events.move)?
+										this.move
+									:	((binding.event === this.events.aim)?
+										this.aim
+									:	null));
+							
+							if(thumbstick) {
+								thumbstick.move(this.eventPos(touch));
+								binding.event.thing(thumbstick.vector());
+							}
+						}
+					}
+				},
+				'touchend.lumens': function(event) {
+					event.preventDefault();
+					
+					var e = event.originalEvent;
+					for(var t = 0; t < e.changedTouches.length; ++t) {
+						var touch = e.changedTouches[t],
+							binding = this.bindingWithTouch(touch);
+						
+						if(binding) {
+							var thumbstick = ((binding.event === this.events.move)?
+										this.move
+									:	((binding.event === this.events.aim)?
+										this.aim
+									:	null));
+							
+							if(thumbstick) { thumbstick.lift(); }
+
+							binding.event.thing(false);
+						}
+					}
+				}
+			},
+			bindingWithTouch: function(touch) {
+				for(var b = 0; b < this.bindings.length; ++b) {
+					var binding = this.bindings[b];
+					if(binding.touch.identifier == touch.identifier) {
+						return binding;
+					}
+				}
+			},
+			bindingWithEvent: function(event) {
+				for(var b = 0; b < this.bindings.length; ++b) {
+					var binding = this.bindings[b], e = this.events[event];
+					if(binding.event == e) { return binding; }
+				}
+			}
 		});
 
 		function Lumens($viewport) {
@@ -920,7 +1063,7 @@
 
 			this.renderer = new Renderer();
 			//this.collider = new Collider();
-			this.controller = new Controller(this);
+			this.controller = Controller.make(this);
 			this.persistor = new Persistor();
 			this.networker = new Networker();
 			
