@@ -14,7 +14,7 @@
 			*	Value is the callback function provided */
 			this.callbacks = {};
 		}
-		$.extend(Observable.prototype, {
+		$.extend(Watchable.prototype, {
 			update: function() {
 				for(var c in this.callbacks) {
 					var callback = this.callbacks[c];
@@ -322,6 +322,8 @@
 		
 		/* Conversion functions adapted from Michael Jackson's (really) - http://mjijackson.com/2008/02/rgb-to-hsl-and-rgb-to-hsv-color-model-conversion-algorithms-in-javascript */
 		function Color(options) {
+			if(!options) { options = {}; }
+
 			if($.isNumeric(options.h)) {
 				this.fromHSLA(options.h, options.s, options.l, options.a);
 			}
@@ -388,6 +390,14 @@
 
 				return { h: Math.floor(h*360), s: Math.floor(s*100),
 					l: Math.floor(l*100), a: this.a };
+			},
+			RGBAString: function() {
+				var rgba = this.toRGBA();
+				return "rgba("+rgba.r+", "+rgba.g+", "+rgba.b+", "+rgba.a;
+			},
+			HSLAString: function() {
+				var hsla = this.toHSLA();
+				return "hsla("+hsla.h+", "+hsla.s+", "+hsla.l+", "+hsla.a;
 			}
 		});
 
@@ -436,6 +446,9 @@
 			this.updateBounds();
 			
 			this.color = (options.color || new Color());
+
+			this.closed = ((options.closed !== undefined)? options.closed : true);
+			this.filled = ((options.filled !== undefined)? options.filled : true);
 		}
 		$.extend(Shape.prototype, {
 			update: function() { return this; },
@@ -460,6 +473,35 @@
 				}
 				
 				return this;
+			},
+			draw: function(context) {
+				if(this.points.length >= 2) {
+					var color = this.color.RGBAString(),
+						falloff = 0.7,
+						point = this.points[0], last = null, ctrlP = null;
+
+					context.save();
+					$.extend(context, { strokeStyle: color, fillStyle: color });
+					context.beginPath();
+					context.moveTo(point);
+
+					for(var p = 1; p < this.points.length; ++p) {
+						last = point;
+						point = this.points[p];
+						ctrlP = point.add(point.sub(last).doScale(falloff));
+						context.quadraticCurveTo(ctrlP.x, ctrlP.y, point.x, point.y);
+					}
+
+					if(this.closed) {
+						last = this.points[this.points.length-1];
+						point = this.points[0];
+						ctrlP = point.add(point.sub(last).doScale(falloff));
+						context.quadraticCurveTo(ctrlP.x, ctrlP.y, point.x, point.y);
+					}
+
+					context[((this.filled)? 'fill' : 'stroke')]();
+					context.restore();
+				}
 			}
 		});
 		
@@ -482,9 +524,11 @@
 		});*/
 		
 		function SwarmInfluence(options) {
+			if(!options) { options = {}; }
+
 			this.swarm = options.swarm;
 		}
-		$.extend(SwarmInfluence.prototype, Influencer.prototype, {
+		$.extend(SwarmInfluence.prototype, {
 			generate: function(member, rad, weight) {
 				var totalSeparation = new Vector2D(), totalCohesion = new Vector2D(),
 					totalAlignment = new Vector2D(), swarmForce = new Vector2D(),
@@ -639,7 +683,7 @@
 		
 		/* Template class
 			Update function must override the one of the physical body "Type" */
-		function EntityTemplate(Type, options) {
+		function Entity(Type, options) {
 			if(!options) { options = {}; }
 			
 			this.Type = options.Type;
@@ -647,9 +691,9 @@
 			
 			this.health = (options.health || 100);
 			
-			this.state = EntityTemplate.states.spawn;
+			this.state = Entity.states.spawn;
 		}
-		$.extend(EntityTemplate.prototype, {
+		$.extend(Entity.prototype, {
 			resolve: function(dt) {
 				if(dt) {
 					this.Type.prototype.resolve.call(this, dt);
@@ -660,24 +704,46 @@
 			},
 			update: function() { return this; }
 		});
-		EntityTemplate.states = new Enum("spawn", "normal", "dead");
+		Entity.states = new Enum("spawn", "normal", "dead");
 		
 		function Firefly(options) {
 			if(!options) { options = {}; }
+
+			this.maxForce = (options.maxForce || 10);
+			this.maxTorque = (options.maxTorque || 10);
 			
 			/* Particle entity template */
 			/* TODO: change to RigidBody */
-			EntityTemplate.call(this, Particle, options);
+			Entity.call(this, Particle, options);
 			
 			/* Set up the shape */
 			/* TODO: change to RigidShape */
 			options.centerMass = this.pos;
 			this.shape = new Shape(options);
 		}
-		$.extend(Firefly.prototype, Particle.prototype, EntityTemplate.prototype, {
-			update: function() { return this; }
+		$.extend(Firefly.prototype, Particle.prototype, Entity.prototype, {
+			update: function() { return this; },
+			move: function(force) {
+				this.force += force*this.maxForce;
+				return this;
+			},
+			aim: function(angle) {
+				return this;
+			},
+			attack: function(active) {
+				return this;
+			},
+			beam: function(active) {
+				return this;
+			},
+			repel: function(active) {
+				return this;
+			},
+			range: function(active) {
+				return this;
+			}
 		});
-		$.extend(Firefly.states, EntityTemplate.states,
+		$.extend(Firefly.states, Entity.states,
 			new Enum("wander", "transition"));
 		
 		function Predator(options) {
@@ -685,7 +751,7 @@
 			
 			/* Particle entity template */
 			/* TODO: change to RigidBody */
-			EntityTemplate.call(this, Particle, options);
+			Entity.call(this, Particle, options);
 			
 			/* Set up the shape */
 			/* TODO: change to RigidShape */
@@ -700,7 +766,7 @@
 			
 			this.state = Predator.states.spawn;
 		}
-		$.extend(Predator.prototype, Particle.prototype, EntityTemplate.prototype, {
+		$.extend(Predator.prototype, Particle.prototype, Entity.prototype, {
 			update: function() {
 				switch(this.state) {
 				case Predator.states.passive: case Predator.states.aggressive:
@@ -716,7 +782,7 @@
 				return this;
 			}
 		});
-		$.extend(Predator.states, EntityTemplate.states,
+		$.extend(Predator.states, Entity.states,
 			new Enum("passive", "aggressive", "feeding", "stunned"));
 	// }
 	
@@ -767,7 +833,7 @@
 
 						if(neighbour.bounds.center.distSq(light.pos) <
 						Math.pow(light.rad+neighbour.bounds.rad, 2)) {
-							litEntities.push(neighbour);
+							litBodies.push(neighbour.shape);
 						}
 					}
 
@@ -861,39 +927,43 @@
 					/* TODO: decide whether l, u, r, d moves player and
 						mouse/other keys aim (like twin-stick, but need
 						option to flip sides for lefties), or if u, d
-						move player and mouse/l, r aim (like a car)
+						move player and mouse/l, r aim (like a car) */
 					// left, a, j
 					case 37: case 65: case 74:
-						this.mousePos = null;
-						this.events.aim.thing(/* TODO: rotation */);
+						this.events.move.thing(Vector2D(-1, 0));
 					break;
 					
 					// right, d, l
 					case 39: case 68: case 76:
+						this.events.move.thing(Vector2D(1, 0));
 					break;
 					
 					// up, w, i
 					case 38: case 87: case 73:
+						this.events.move.thing(Vector2D(0, 1));
 					break;
 					
 					// down, s, k
 					case 40: case 83: case 75:
+						this.events.move.thing(Vector2D(0, -1));
 					break;
 					
 					// space
-					case 32: break;
+					case 32: this.events.attack.thing(true); break;
 					
 					// x, m
-					case 88: case 77: break;
+					case 88: case 77: this.events.beam.thing(true); break;
 					
 					// c, n
-					case 67: case 78: break;
+					case 67: case 78: this.events.repel.thing(true); break;
 					
 					// v, b
-					case 86: case 66: break;
+					case 86: case 66: this.events.range.thing(true); break;
 					
 					// p, g, enter
-					case 80: case 71: case 13: break;
+					case 80: case 71: case 13:
+						this.events.pause.thing(!this.events.pause.thing());
+					break;
 					
 					default: break;
 					}
@@ -901,31 +971,36 @@
 				'keyup.lumens': function(e) {
 					switch(e.which) {
 					// left, a, j
-					case 37: case 65: case 74: break;
+					case 37: case 65: case 74:
+						this.events.move.thing(null);
+					break;
 					
 					// right, d, l
-					case 39: case 68: case 76: break;
+					case 39: case 68: case 76:
+						this.events.move.thing(null);
+					break;
 					
 					// up, w, i
-					case 38: case 87: case 73: break;
+					case 38: case 87: case 73:
+						this.events.move.thing(null);
+					break;
 					
 					// down, s, k
-					case 40: case 83: break;
+					case 40: case 83: case 75:
+						this.events.move.thing(null);
+					break;
 					
 					// space
-					case 32: break;
+					case 32: this.events.attack.thing(false); break;
 					
 					// x, m
-					case 88: case 77: break;
+					case 88: case 77: this.events.beam.thing(false); break;
 					
 					// c, n
-					case 67: case 78: break;
+					case 67: case 78: this.events.repel.thing(false); break;
 					
 					// v, b
-					case 86: case 66: break;
-					
-					// p, g, enter
-					case 80: case 71: case 13: break;
+					case 86: case 66: this.events.range.thing(false); break;
 					
 					default: break;
 					}
@@ -954,13 +1029,17 @@
 						so we need to work with the original to access the touches arrays */
 					var e = event.originalEvent;
 					
-					for(var t = 0; this.touches.length < 4 &&
-					t < e.changedTouches.length; ++t) {
+					for(var t = 0; t < e.changedTouches.length; ++t) {
 						var touch = e.changedTouches[t],
 							touchPos = this.eventPos(touch);
 
+						if(touchPos.distSq(this.lumens.player.pos) <
+						this.lumens.player.shape.bounds.radSq) {
+							this.events.pause.thing(!this.events.pause.thing());
+						}
+
 						// Place thumbsticks
-						if(!this.move.center) {
+						else if(!this.move.center) {
 							this.move.place(touchPos);
 							this.bindings.push({ touch: touch,
 								event: this.events.move });
@@ -986,13 +1065,12 @@
 									event: this.events.repel.thing(true) });
 							}
 						}
-						else {
+						else if(!this.events.beam.thing()) {
 							// 4th finger down - disable existing, enable beam
 							var b = this.bindingWithEvent((this.events.range.thing())?
-										this.events.range.thing(false)
-									:	this.events.repel.thing(false));
+										this.events.range : this.events.repel);
 
-							this.bindings.splice(this.bindings.indexOf(b), 1,
+							this.bindings.splice(this.bindings.indexOf(b.thing(false)), 1,
 								{ touch: touch, event: this.events.beam.thing(true) });
 						}
 					}
@@ -1007,15 +1085,14 @@
 							binding = this.bindingWithTouch(touch);
 						
 						if(binding) {
-							var thumbstick = ((binding.event === this.events.move)?
-										this.move
-									:	((binding.event === this.events.aim)?
-										this.aim
-									:	null));
-							
-							if(thumbstick) {
-								thumbstick.move(this.eventPos(touch));
-								binding.event.thing(thumbstick.vector());
+							if(binding.event === this.events.move) {
+								this.move.move(this.eventPos(touch));
+								this.events.move.thing(thumbstick.vector());
+							}
+							else if(binding.event === this.events.aim) {
+								this.aim.move(this.eventPos(touch));
+								this.events.aim.thing(thumbstick.vector());
+								this.events.attack.thing(true);
 							}
 						}
 					}
@@ -1029,15 +1106,15 @@
 							binding = this.bindingWithTouch(touch);
 						
 						if(binding) {
-							var thumbstick = ((binding.event === this.events.move)?
-										this.move
-									:	((binding.event === this.events.aim)?
-										this.aim
-									:	null));
-							
-							if(thumbstick) { thumbstick.lift(); }
-
-							binding.event.thing(false);
+							if(binding.event === this.events.move) {
+								this.events.move.thing(false);
+								this.bindings.splice(this.bindings.indexOf(binding), 1);
+							}
+							else if(binding.event === this.events.aim) {
+								this.events.aim.thing(false);
+								this.events.attack.thing(false);
+								this.bindings.splice(this.bindings.indexOf(binding), 1);
+							}
 						}
 					}
 				}
@@ -1062,10 +1139,10 @@
 			this.$viewport = (($viewport.jquery)? $viewport : $($viewport));
 
 			this.renderer = new Renderer();
-			//this.collider = new Collider();
 			this.controller = Controller.make(this);
-			this.persistor = new Persistor();
-			this.networker = new Networker();
+			//this.collider = new Collider();
+			//this.persistor = new Persistor();
+			//this.networker = new Networker();
 			
 			this.settings = {
 				width: 0, height: 0,
@@ -1077,7 +1154,7 @@
 			};
 
 			this.time = Date.now();
-			this.running = true;
+			this.state = Lumens.states.running;
 			
 			this.entities = [];
 			this.swarm = [];
@@ -1102,6 +1179,15 @@
 							swarm: this.swarmTree
 						})));
 			}
+
+			this.controller.events.move.watch(this.player.move);
+			this.controller.events.aim.watch(this.player.aim);
+			this.controller.events.attack.watch(this.player.attack);
+			this.controller.events.beam.watch(this.player.beam);
+			this.controller.events.repel.watch(this.player.repel);
+			this.controller.events.range.watch(this.player.range);
+
+			this.controller.events.pause.watch(this.pause);
 			
 			/* If rendering is to be done asynchronously, a render tree
 				should be maintained for each render, while updates may
@@ -1121,51 +1207,57 @@
 				
 				this.time = currentTime;
 
-				/* Clear the Quadtrees */
-				this.entityTree.clear();
-				this.swarmTree.clear();
-				
-				/* Resolve everything */
-				for(var r = 0; r < this.entities.length; ++r) {
-					var entity = this.entities[r].resolve(dt),
-						bounds = entity.shape.bounds,
-						treeItem = {
-							object: entity,
-							x: bounds.center.x-bounds.rad,
-							y: bounds.center.y-bounds.rad,
-							width: bounds.center.x+bounds.rad,
-							height: bounds.center.y+bounds.rad
-						};
+				if(this.state === Lumens.states.running) {
+					/* Clear the Quadtrees */
+					this.entityTree.clear();
+					this.swarmTree.clear();
 					
-					/* Populate Quadtrees */
-					this.entityTree.add(treeItem);
-					
-					if(this.swarm.indexOf(entity) !== -1) {
-						this.swarmTree.add(treeItem);
+					/* Resolve everything */
+					for(var r = 0; r < this.entities.length; ++r) {
+						var entity = this.entities[r].resolve(dt),
+							bounds = entity.shape.bounds,
+							treeItem = {
+								object: entity,
+								x: bounds.center.x-bounds.rad,
+								y: bounds.center.y-bounds.rad,
+								width: bounds.center.x+bounds.rad,
+								height: bounds.center.y+bounds.rad
+							};
+						
+						/* Populate Quadtrees */
+						this.entityTree.add(treeItem);
+						
+						if(this.swarm.indexOf(entity) !== -1) {
+							this.swarmTree.add(treeItem);
+						}
 					}
-				}
 
-				/* Update everything:
-					collisions, force accumulation, anything querying
-					the Quadtrees */
-				for(var u = 0; u < this.entities.length; ++u) {
-					this.entities[u].update(dt);
-				}
-				
-				/* Render */
-				/* Should be done asynchronously, through web workers:
-				// Render called in renderer
-				if(this.running) {
-					setTimeout(this.step.call, 1000/60, this);
-				} */
+					/* Update everything:
+						collisions, force accumulation, anything querying
+						the Quadtrees */
+					for(var u = 0; u < this.entities.length; ++u) {
+						this.entities[u].update(dt);
+					}
+					
+					/* Render */
+					/* Should be done asynchronously, through web workers:
+					// Render called in renderer
+					if(this.running) {
+						setTimeout(this.step.call, 1000/60, this);
+					} */
 
-				this.renderer.render();
+					this.renderer.render();
 
-				if(this.running) {
 					var lumens = this;
 					requestAnimationFrame(function() { lumens.step(); });
 				}
+			},
+			pause: function(paused) {
+				if(this.state != Lumens.states.fin) {
+					this.state = Lumens.states[((paused)? 'paused' : 'running')];
+				}
 			}
 		});
+		Lumens.states = new Enum('running', 'paused', 'fin');
 	// }
 })(jQuery);
