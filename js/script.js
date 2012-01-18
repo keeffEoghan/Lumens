@@ -41,10 +41,8 @@
 				any arguments, and an id */
 			watch: function(func, args) {
 				var id = this.idGen++;
-				this.callbacks[id] = {
-					func: func,
-					args: arguments.slice(2)
-				};
+				this.callbacks[id] = { func: func,
+					args: Array.prototype.slice.call(arguments, 2) };
 				return id;
 			},
 			
@@ -147,7 +145,7 @@
 		*/
 		/* Operates on items with the structure { x, y } for Nodes
 			and { x, y, width, height } for BoundsNodes */
-		function QuadTree(bounds, pointQuad, maxDepth, maxKids, kids) {
+		function QuadTree(bounds, maxDepth, maxKids, kids, pointQuad) {
 			this.root = ((pointQuad)?
 					new Node(bounds, 0, maxDepth, maxKids)
 				:	new BoundsNode(bounds, 0, maxDepth, maxKids));
@@ -174,8 +172,8 @@
 			this.kids = [];
 			this.nodes = [];
 		}
-		$.extend(Node.corners, new Enum("topLeft", "topRight",
-			"bottomLeft", "bottomRight"));
+		Node.corners = new Enum("topLeft", "topRight",
+			"bottomLeft", "bottomRight");
 		$.extend(Node.prototype, {
 			add: function(item) {
 				if(this.nodes.length) { this.nodes[this.index(item)].add(item); }
@@ -240,7 +238,7 @@
 					width: halfWidth, height: halfHeight }, depth);
 				
 				this.nodes[Node.corners.bottomLeft] = new Node({
-					x: bounds.x, y: bottomHalf,
+					x: this.bounds.x, y: bottomHalf,
 					width: halfWidth, height: halfHeight }, depth);
 				
 				this.nodes[Node.corners.bottomRight] = new Node({
@@ -261,10 +259,10 @@
 		});
 		
 		function BoundsNode(bounds, depth, maxDepth, maxKids) {
-			Node.call(this, arguments);
+			Node.apply(this, arguments);
 			this.borderKids = [];
 		}
-		$.extend(BoundsNode.corners, Node.corners);
+		BoundsNode.corners = Node.corners;
 		$.extend(BoundsNode.prototype, Node.prototype, {
 			add: function(item) {
 				if(this.nodes.length) {
@@ -321,17 +319,15 @@
 		});
 		
 		/* Conversion functions adapted from Michael Jackson's (really) - http://mjijackson.com/2008/02/rgb-to-hsl-and-rgb-to-hsv-color-model-conversion-algorithms-in-javascript */
-		function Color(options) {
-			if(!options) { options = {}; }
-
-			if($.isNumeric(options.h)) {
-				this.fromHSLA(options.h, options.s, options.l, options.a);
-			}
-			else { this.fromRGBA(options.r, options.g, options.b, options.a); }
+		function Color() {
+			this.r = 0;
+			this.g = 0;
+			this.b = 0;
+			this.a = 0;
 		}
 		$.extend(Color.prototype, {
 			fromHSLA: function(h, s, l, a) {
-				if(s === 0) { r = g = b = l; }
+				if(s === 0) { this.r = this.g = this.b = l; }
 				else {
 					var hueToRGB = function(p, q, t) {
 						if(t < 0) { ++t; }
@@ -400,6 +396,14 @@
 				return "hsla("+hsla.h+", "+hsla.s+", "+hsla.l+", "+hsla.a;
 			}
 		});
+		$.extend(Color, {
+			fromHSLA: function(h, s, l, a) {
+				return (new Color()).fromHSLA(h, s, l, a);
+			},
+			fromRGBA: function(r, g, b, a) {
+				return (new Color()).fromRGBA(r, g, b, a);
+			}
+		});
 
 		// For touchscreen devices
 		function Thumbstick(radius, unit) {
@@ -442,13 +446,15 @@
 			
 			this.points = (($.isArray(options.points))? options.points : []);
 			
-			this.bounds = { rad: 0, radSq: 0, center: new Vector2D() };
-			this.updateBounds();
-			
-			this.color = (options.color || new Color());
+			/* Visual information goes in here
+				TODO: patterns, images, etc */
+			this.color = (options.color || Color.fromRGBA(255, 255, 255, 1));
 
 			this.closed = ((options.closed !== undefined)? options.closed : true);
 			this.filled = ((options.filled !== undefined)? options.filled : true);
+			
+			this.bounds = { rad: 0, radSq: 0, center: new Vector2D() };
+			this.updateBounds();
 		}
 		$.extend(Shape.prototype, {
 			update: function() { return this; },
@@ -465,7 +471,7 @@
 					this.bounds.center.doScale(1/l);
 					
 					for(var j = 0; j < l; ++j) {
-						var radSq = this.bounds.center.distSq(this.points[i]);
+						var radSq = this.bounds.center.distSq(this.points[j]);
 						if(radSq > this.bounds.radSq) { this.bounds.radSq = radSq; }
 					}
 					
@@ -523,10 +529,8 @@
 			}
 		});*/
 		
-		function SwarmInfluence(options) {
-			if(!options) { options = {}; }
-
-			this.swarm = options.swarm;
+		function SwarmInfluence(swarm) {
+			this.swarm = swarm;		// QuadTree
 		}
 		$.extend(SwarmInfluence.prototype, {
 			generate: function(member, rad, weight) {
@@ -540,11 +544,11 @@
 					
 					num = 0;
 				
-				for(var n = 0; n < neighbours; ++n) {
-					var neighbour = neighbours[n];
+				for(var n = 0; n < neighbours.length; ++n) {
+					var neighbour = neighbours[n].item;
 					
 					if(member !== neighbour) {
-						var dist = this.pos.dist(neighbour.pos);
+						var dist = member.pos.dist(neighbour.pos);
 						
 						if(dist < rad) {
 							++num;
@@ -577,9 +581,11 @@
 			this.force = (options.force || new Vector2D());
 			
 			if(options.mass) { this.setMass(options.mass); }
-			else { this.invMass = (($.isNumeric(options.invMass))? options.invMass : 1); }
+			else { this.invMass = (($.isNumeric(options.invMass))?
+						options.invMass : 1); }
 			
-			this.damping = (($.isNumeric(options.damping))? options.damping : 0.99);
+			this.damping = (($.isNumeric(options.damping))?
+				options.damping : 0.99);
 			
 			/* Previous positions - use phosphenes instead later */
 			this.trail = [];
@@ -686,7 +692,7 @@
 		function Entity(Type, options) {
 			if(!options) { options = {}; }
 			
-			this.Type = options.Type;
+			this.Type = Type;
 			this.Type.call(this, options);
 			
 			this.health = (options.health || 100);
@@ -718,13 +724,20 @@
 			
 			/* Set up the shape */
 			/* TODO: change to RigidShape */
-			options.centerMass = this.pos;
-			this.shape = new Shape(options);
+			var points = [], num = 10, rad = 20, v = 0, end = 2, i = end/(num-1);
+
+			for(var p = 0; p < num; v += i, ++p) {
+				points.push(this.pos.add(new Vector2D(rad*Math.cos(Math.PI*v),
+													rad*Math.sin(Math.PI*v))));
+			}
+
+			this.shape = new Shape($.extend({}, options,
+				{ centerMass: this.pos, points: points }));
 		}
 		$.extend(Firefly.prototype, Particle.prototype, Entity.prototype, {
 			update: function() { return this; },
 			move: function(force) {
-				this.force += force*this.maxForce;
+				this.force.doAdd(force*this.maxForce);
 				return this;
 			},
 			aim: function(angle) {
@@ -743,7 +756,7 @@
 				return this;
 			}
 		});
-		$.extend(Firefly.states, Entity.states,
+		Firefly.states = $.extend({}, Entity.states,
 			new Enum("wander", "transition"));
 		
 		function Predator(options) {
@@ -753,16 +766,23 @@
 			/* TODO: change to RigidBody */
 			Entity.call(this, Particle, options);
 			
-			/* Set up the shape */
-			/* TODO: change to RigidShape */
-			options.centerMass = this.pos;
-			this.shape = new Shape(options);
-			
 			this.swarmInfluence = options.swarmInfluence;
 
 			this.neighbourRad = options.neighbourRad;
 			this.weight = (options.weight || { separation: 0.25,
 				cohesion: 0.25, alignment: 0.25, wander: 0.25 });
+			
+			/* Set up the shape */
+			/* TODO: change to RigidShape */
+			var points = [], num = 10, rad = 20, v = 0, end = 2, i = end/(num-1);
+
+			for(var p = 0; p < num; v += i, ++p) {
+				points.push(this.pos.add(new Vector2D(rad*Math.cos(Math.PI*v),
+													rad*Math.sin(Math.PI*v))));
+			}
+
+			this.shape = new Shape($.extend({}, options,
+				{ centerMass: this.pos, points: points }));
 			
 			this.state = Predator.states.spawn;
 		}
@@ -771,8 +791,8 @@
 				switch(this.state) {
 				case Predator.states.passive: case Predator.states.aggressive:
 				case Predator.states.normal:
-					this.force += this.swarmInfluence
-						.generate(this, this.neighbourRad, this.weight);
+					this.force.doAdd(this.swarmInfluence
+						.generate(this, this.neighbourRad, this.weight));
 				break;
 				
 				default:
@@ -782,7 +802,7 @@
 				return this;
 			}
 		});
-		$.extend(Predator.states, Entity.states,
+		Predator.states = $.extend({}, Entity.states,
 			new Enum("passive", "aggressive", "feeding", "stunned"));
 	// }
 	
@@ -798,26 +818,28 @@
 	
 	// MAIN {
 		function Renderer(canvas) {
+			this.canvas = canvas;
+			this.context = this.canvas.getContext('2d');
+			
 			this.shapes = [];
 			this.shapeTree = {};
 
 			this.lights = [];
 			this.glows = [];
 
-			this.context = canvas.getContext('2d');
-			
 			this.renderDone = new Watchable();
 			//this.running = true;
 		}
 		$.extend(Renderer.prototype, {
 			render: function() {
+				/* Note: y axis goes downwards */
 				/* Clear */
-				this.canvas.clearRect(0, 0, canvas.width, canvas.height);
+				this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
 
 				/* Lit areas */
 				var litBodies = [];
 
-				context.globalCompositeOperation = 'source-over';
+				this.context.globalCompositeOperation = 'source-over';
 
 				for(var l = 0; l < this.lights.length; ++l) {
 					var light = this.lights[l],
@@ -841,14 +863,14 @@
 				}
 
 				/* Bodies - only drawn in the light */
-				context.globalCompositeOperation = 'source-atop';
+				this.context.globalCompositeOperation = 'source-atop';
 
-				for(var lB = 0; lB < litEntities.length; ++lB) {
+				for(var lB = 0; lB < litBodies.length; ++lB) {
 					litBodies[lB].draw(this.context);
 				}
 
 				/* Glowing cores - drawn everywhere */
-				context.globalCompositeOperation = 'destination-over';
+				this.context.globalCompositeOperation = 'destination-over';
 
 				for(var g = 0; g < this.glows.length; ++g) {
 					this.glows[g].draw(this.context);
@@ -911,18 +933,21 @@
 				If other elements are on the page, then they must catch and
 				stop propogation of events meant for them
 				Pausing the game relinquishes global listening */
-			$(document).on(this.handlers);
+			$(document).off('.lumens').on(this.handlers, { ctrl: this });
 		}
 		$.extend(MKController.prototype, Controller.prototype, {
 			handlers: {
-				'mousedown.lumens': function(e) { this.events.attack.thing(true); },
-				'mouseup.lumens': function(e) { this.events.attack.thing(false); },
+				'mousedown.lumens': function(e) { e.data.ctrl.events.attack.thing(true); },
+				'mouseup.lumens': function(e) { e.data.ctrl.events.attack.thing(false); },
 				'mousemove.lumens': function(e) {
-					this.mousePos = this.eventPos(e);
-					this.events.aim.thing(this.mousePos.sub(this.lumens.player.pos)
+					var ctrl = e.data.ctrl;
+					ctrl.mousePos = ctrl.eventPos(e);
+					ctrl.events.aim.thing(ctrl.mousePos.sub(ctrl.lumens.player.pos)
 						.doUnit());
 				},
 				'keydown.lumens': function(e) {
+					var ctrl = e.data.ctrl;
+
 					switch(e.which) {
 					/* TODO: decide whether l, u, r, d moves player and
 						mouse/other keys aim (like twin-stick, but need
@@ -930,77 +955,79 @@
 						move player and mouse/l, r aim (like a car) */
 					// left, a, j
 					case 37: case 65: case 74:
-						this.events.move.thing(Vector2D(-1, 0));
+						ctrl.events.move.thing(Vector2D(-1, 0));
 					break;
 					
 					// right, d, l
 					case 39: case 68: case 76:
-						this.events.move.thing(Vector2D(1, 0));
+						ctrl.events.move.thing(Vector2D(1, 0));
 					break;
 					
 					// up, w, i
 					case 38: case 87: case 73:
-						this.events.move.thing(Vector2D(0, 1));
+						ctrl.events.move.thing(Vector2D(0, 1));
 					break;
 					
 					// down, s, k
 					case 40: case 83: case 75:
-						this.events.move.thing(Vector2D(0, -1));
+						ctrl.events.move.thing(Vector2D(0, -1));
 					break;
 					
 					// space
-					case 32: this.events.attack.thing(true); break;
+					case 32: ctrl.events.attack.thing(true); break;
 					
 					// x, m
-					case 88: case 77: this.events.beam.thing(true); break;
+					case 88: case 77: ctrl.events.beam.thing(true); break;
 					
 					// c, n
-					case 67: case 78: this.events.repel.thing(true); break;
+					case 67: case 78: ctrl.events.repel.thing(true); break;
 					
 					// v, b
-					case 86: case 66: this.events.range.thing(true); break;
+					case 86: case 66: ctrl.events.range.thing(true); break;
 					
 					// p, g, enter
 					case 80: case 71: case 13:
-						this.events.pause.thing(!this.events.pause.thing());
+						ctrl.events.pause.thing(!ctrl.events.pause.thing());
 					break;
 					
 					default: break;
 					}
 				},
 				'keyup.lumens': function(e) {
+					var ctrl = e.data.ctrl;
+
 					switch(e.which) {
 					// left, a, j
 					case 37: case 65: case 74:
-						this.events.move.thing(null);
+						ctrl.events.move.thing(null);
 					break;
 					
 					// right, d, l
 					case 39: case 68: case 76:
-						this.events.move.thing(null);
+						ctrl.events.move.thing(null);
 					break;
 					
 					// up, w, i
 					case 38: case 87: case 73:
-						this.events.move.thing(null);
+						ctrl.events.move.thing(null);
 					break;
 					
 					// down, s, k
 					case 40: case 83: case 75:
-						this.events.move.thing(null);
+						ctrl.events.move.thing(null);
 					break;
 					
 					// space
-					case 32: this.events.attack.thing(false); break;
+					case 32: ctrl.events.attack.thing(false); break;
 					
 					// x, m
-					case 88: case 77: this.events.beam.thing(false); break;
+					case 88: case 77: ctrl.events.beam.thing(false); break;
 					
 					// c, n
-					case 67: case 78: this.events.repel.thing(false); break;
+					case 67: case 78: ctrl.events.repel.thing(false); break;
 					
 					// v, b
-					case 86: case 66: this.events.range.thing(false); break;
+					case 86: case 66: ctrl.events.range.thing(false); break;
 					
 					default: break;
 					}
@@ -1017,7 +1044,7 @@
 			this.bindings = [];	// { touch, event }
 
 			// Bind events
-			this.lumens.$viewport.off('.lumens').on(this.handlers);
+			this.lumens.$viewport.off('.lumens').on(this.handlers, { ctrl: this });
 		}
 		$.extend(TouchController.prototype, Controller.prototype, {
 			handlers: {
@@ -1027,72 +1054,72 @@
 					
 					/* jQuery normalises (and alters) event properties (http://stackoverflow.com/questions/3183872/does-jquery-preserve-touch-events-properties),
 						so we need to work with the original to access the touches arrays */
-					var e = event.originalEvent;
+					var e = event.originalEvent, ctrl = event.data.ctrl;
 					
 					for(var t = 0; t < e.changedTouches.length; ++t) {
 						var touch = e.changedTouches[t],
-							touchPos = this.eventPos(touch);
+							touchPos = ctrl.eventPos(touch);
 
-						if(touchPos.distSq(this.lumens.player.pos) <
-						this.lumens.player.shape.bounds.radSq) {
-							this.events.pause.thing(!this.events.pause.thing());
+						if(touchPos.distSq(ctrl.lumens.player.pos) <
+						ctrl.lumens.player.shape.bounds.radSq) {
+							ctrl.events.pause.thing(!ctrl.events.pause.thing());
 						}
 
 						// Place thumbsticks
-						else if(!this.move.center) {
-							this.move.place(touchPos);
-							this.bindings.push({ touch: touch,
-								event: this.events.move });
+						else if(!ctrl.move.center) {
+							ctrl.move.place(touchPos);
+							ctrl.bindings.push({ touch: touch,
+								event: ctrl.events.move });
 						}
-						else if(!this.aim.center) {
-							this.aim.place(touchPos);
-							this.bindings.push({ touch: touch,
-								event: this.events.aim });
+						else if(!ctrl.aim.center) {
+							ctrl.aim.place(touchPos);
+							ctrl.bindings.push({ touch: touch,
+								event: ctrl.events.aim });
 						}
 
 						// Activate enhanced modes
-						else if(!this.events.range.thing() &&
-						!this.events.repel.thing()) {
-							var moveDistSq = touchPos.distSq(this.move.center),
-								aimDistSq = touchPos.distSq(this.aim.center);
+						else if(!ctrl.events.range.thing() &&
+						!ctrl.events.repel.thing()) {
+							var moveDistSq = touchPos.distSq(ctrl.move.center),
+								aimDistSq = touchPos.distSq(ctrl.aim.center);
 							
 							if(moveDistSq < aimDistSq) {
-								this.bindings.push({ touch: touch,
-									event: this.events.range.thing(true) });
+								ctrl.bindings.push({ touch: touch,
+									event: ctrl.events.range.thing(true) });
 							}
 							else {
-								this.bindings.push({ touch: touch,
-									event: this.events.repel.thing(true) });
+								ctrl.bindings.push({ touch: touch,
+									event: ctrl.events.repel.thing(true) });
 							}
 						}
-						else if(!this.events.beam.thing()) {
+						else if(!ctrl.events.beam.thing()) {
 							// 4th finger down - disable existing, enable beam
-							var b = this.bindingWithEvent((this.events.range.thing())?
-										this.events.range : this.events.repel);
+							var b = ctrl.bindingWithEvent((ctrl.events.range.thing())?
+										ctrl.events.range : ctrl.events.repel);
 
-							this.bindings.splice(this.bindings.indexOf(b.thing(false)), 1,
-								{ touch: touch, event: this.events.beam.thing(true) });
+							ctrl.bindings.splice(ctrl.bindings.indexOf(b.thing(false)), 1,
+								{ touch: touch, event: ctrl.events.beam.thing(true) });
 						}
 					}
 				},
 				'touchmove.lumens': function(event) {
 					event.preventDefault();
 					
-					var e = event.originalEvent;
+					var e = event.originalEvent, ctrl = event.data.ctrl;
 					
 					for(var t = 0; t < e.changedTouches.length; ++t) {
 						var touch = e.changedTouches[t],
-							binding = this.bindingWithTouch(touch);
+							binding = ctrl.bindingWithTouch(touch);
 						
 						if(binding) {
-							if(binding.event === this.events.move) {
-								this.move.move(this.eventPos(touch));
-								this.events.move.thing(thumbstick.vector());
+							if(binding.event === ctrl.events.move) {
+								ctrl.move.move(ctrl.eventPos(touch));
+								ctrl.events.move.thing(thumbstick.vector());
 							}
-							else if(binding.event === this.events.aim) {
-								this.aim.move(this.eventPos(touch));
-								this.events.aim.thing(thumbstick.vector());
-								this.events.attack.thing(true);
+							else if(binding.event === ctrl.events.aim) {
+								ctrl.aim.move(ctrl.eventPos(touch));
+								ctrl.events.aim.thing(thumbstick.vector());
+								ctrl.events.attack.thing(true);
 							}
 						}
 					}
@@ -1100,20 +1127,21 @@
 				'touchend.lumens': function(event) {
 					event.preventDefault();
 					
-					var e = event.originalEvent;
+					var e = event.originalEvent, ctrl = event.data.ctrl;
+
 					for(var t = 0; t < e.changedTouches.length; ++t) {
 						var touch = e.changedTouches[t],
-							binding = this.bindingWithTouch(touch);
+							binding = ctrl.bindingWithTouch(touch);
 						
 						if(binding) {
-							if(binding.event === this.events.move) {
-								this.events.move.thing(false);
-								this.bindings.splice(this.bindings.indexOf(binding), 1);
+							if(binding.event === ctrl.events.move) {
+								ctrl.events.move.thing(false);
+								ctrl.bindings.splice(ctrl.bindings.indexOf(binding), 1);
 							}
-							else if(binding.event === this.events.aim) {
-								this.events.aim.thing(false);
-								this.events.attack.thing(false);
-								this.bindings.splice(this.bindings.indexOf(binding), 1);
+							else if(binding.event === ctrl.events.aim) {
+								ctrl.events.aim.thing(false);
+								ctrl.events.attack.thing(false);
+								ctrl.bindings.splice(ctrl.bindings.indexOf(binding), 1);
 							}
 						}
 					}
@@ -1138,7 +1166,7 @@
 		function Lumens($viewport) {
 			this.$viewport = (($viewport.jquery)? $viewport : $($viewport));
 
-			this.renderer = new Renderer();
+			this.renderer = new Renderer(this.$viewport[0]);
 			this.controller = Controller.make(this);
 			//this.collider = new Collider();
 			//this.persistor = new Persistor();
@@ -1148,8 +1176,10 @@
 				width: 0, height: 0,
 				player: { options: {} },
 				predators: {
-					num: 0,
-					options: {}
+					num: 700,
+					options: {
+						neighbourRad: 30
+					}
 				}
 			};
 
@@ -1161,22 +1191,24 @@
 			
 			this.entityTree = new QuadTree({ x: 0, y: 0,
 					width: this.settings.width, height: this.settings.height },
-				false, 8, 10);
+				8, 10);
 			this.swarmTree = new QuadTree({ x: 0, y: 0,
 					width: this.settings.width, height: this.settings.height },
-				false, 8, 10);
+				8, 10);
 			
 			this.player = new Firefly(this.settings.player.options);
+
+			this.settings.predators.options.swarmInfluence =
+				new SwarmInfluence(this.swarmTree);
 			
-			for(var p = 0; p < this.settings.predators.length; ++p) {
+			for(var p = 0; p < this.settings.predators.num; ++p) {
 				this.entities.push(new Predator($.extend({},
 					this.settings.predators.options, {
 							pos: new Vector2D(Math.random()*
 									this.settings.width,
 								Math.random()*this.settings.height),
 							angle: new Vector2D(Math.random(),
-								Math.random()).doUnit(),
-							swarm: this.swarmTree
+								Math.random()).doUnit()
 						})));
 			}
 
@@ -1198,6 +1230,7 @@
 				this.renderer.shapeTree ... this.entityTree;
 			}).call, this); */
 			
+			var lumens = this;
 			requestAnimationFrame(function() { lumens.step(); });
 		}
 		$.extend(Lumens.prototype, {
@@ -1217,7 +1250,7 @@
 						var entity = this.entities[r].resolve(dt),
 							bounds = entity.shape.bounds,
 							treeItem = {
-								object: entity,
+								item: entity,
 								x: bounds.center.x-bounds.rad,
 								y: bounds.center.y-bounds.rad,
 								width: bounds.center.x+bounds.rad,
@@ -1260,4 +1293,8 @@
 		});
 		Lumens.states = new Enum('running', 'paused', 'fin');
 	// }
+
+	$(function() {
+		var lumens = new Lumens('#lumens');
+	});
 })(jQuery);
