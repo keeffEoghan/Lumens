@@ -13,6 +13,7 @@
 			*	Key is an id representing the object observing this one
 			*	Value is the callback function provided */
 			this.callbacks = {};
+			this.idGen = 0;
 		}
 		$.extend(Watchable.prototype, {
 			update: function() {
@@ -327,6 +328,12 @@
 		}
 		$.extend(Color.prototype, {
 			fromHSLA: function(h, s, l, a) {
+				h /= 359;
+				s /= 100;
+				l /= 100;
+
+				this.a = a;
+
 				if(s === 0) { this.r = this.g = this.b = l; }
 				else {
 					var hueToRGB = function(p, q, t) {
@@ -355,7 +362,8 @@
 				return this;
 			},
 			toRGBA: function() {
-				return { r: this.r*255, g: this.g*255, b: this.b*255, a: this.a };
+				return { r: (this.r*255) | 0, g: (this.g*255) | 0,
+					b: (this.b*255) | 0, a: this.a };
 			},
 			toHSLA: function() {
 				var max = Math.max(this.r, this.g, this.b),
@@ -384,8 +392,7 @@
 					h /= 6;
 				}
 
-				return { h: Math.floor(h*360), s: Math.floor(s*100),
-					l: Math.floor(l*100), a: this.a };
+				return { h: (h*360) | 0, s: (s*100) | 0, l: (l*100) | 0, a: this.a };
 			},
 			RGBAString: function() {
 				var rgba = this.toRGBA();
@@ -421,7 +428,7 @@
 				this.pos = v;
 
 				var vector = this.vector();
-				if(this.unit || vector.magSq() > this.rad*this.rad) {
+				if(vector.magSq() > this.rad*this.rad) {
 					// Pin to range
 					this.pos = vector.doUnit().doScale(this.rad)
 						.doAdd(this.center);	// Makes relative vector absolute
@@ -433,11 +440,50 @@
 			vector: function() {
 				if(!this.rad) { $.error("Thumbstick error: cannot have zero radius"); }
 				return this.pos.sub(this.center).doScale(1/this.rad);
+			},
+			angle: function() {
+				if(!this.rad) { $.error("Thumbstick error: cannot have zero radius"); }
+				return this.pos.sub(this.center).doUnit();
+			},
+			render: function(context) {
+				return this;
 			}
 		});
 	// }
 	
 	// PHYSICS {
+		// Pointlight
+		function Light(options) {
+			if(!options) { options = {}; }
+			
+			this.pos = (options.pos || new Vector2D());
+			this.rad = (options.rad || 5);
+			this.color = (options.color || Color.fromRGBA(255, 255, 255, 1));
+		}
+		$.extend(Light.prototype, {
+			render: function(context) {
+				if(this.rad) {
+					context.save();
+
+					var color = this.color.RGBAString(), falloff = 0.8;
+					
+					context.fillStyle = context.createRadialGradient(this.pos.x,
+								this.pos.y, this.rad*falloff,
+								this.pos.x, this.pos.y, this.rad)
+							.addColorStop(0, color)
+							.addColorStop(1, "rgba(0, 0, 0, 0)");
+					
+					context.beginPath();
+					context.arc(this.pos.x, this.pos.y, this.rad, 0, Math.PI*2);
+					context.fill();
+
+					context.restore();
+				}
+
+				return this;
+			}
+		});
+
 		
 		function Shape(options) {
 			if(!options) { options = {}; }
@@ -445,10 +491,11 @@
 			this.centerMass = (options.centerMass || new Vector2D());
 			
 			this.points = (($.isArray(options.points))? options.points : []);
+			// TODO: springs between points
 			
 			/* Visual information goes in here
 				TODO: patterns, images, etc */
-			this.color = (options.color || Color.fromRGBA(255, 255, 255, 1));
+			this.color = (options.color || Color.fromRGBA(200, 200, 200, 0.99));
 
 			this.closed = ((options.closed !== undefined)? options.closed : true);
 			this.filled = ((options.filled !== undefined)? options.filled : true);
@@ -457,8 +504,12 @@
 			this.updateBounds();
 		}
 		$.extend(Shape.prototype, {
-			update: function() { return this; },
-			resolve: function(dt) { return this.update(); },
+			update: function() {
+				return this;
+			},
+			resolve: function(dt) {
+				return this;
+			},
 			
 			updateBounds: function() {
 				this.bounds.radSq = 0; this.bounds.center.doZero();
@@ -480,7 +531,9 @@
 				
 				return this;
 			},
-			draw: function(context) {
+			render: function(context) {
+				/* Probable problem with the way this is done - quadratic curve
+					may go beyond the bounding radius */
 				if(this.points.length >= 2) {
 					var color = this.color.RGBAString(),
 						falloff = 0.7,
@@ -489,7 +542,7 @@
 					context.save();
 					$.extend(context, { strokeStyle: color, fillStyle: color });
 					context.beginPath();
-					context.moveTo(point);
+					context.moveTo(point.x, point.y);
 
 					for(var p = 1; p < this.points.length; ++p) {
 						last = point;
@@ -508,9 +561,12 @@
 					context[((this.filled)? 'fill' : 'stroke')]();
 					context.restore();
 				}
+
+				return this;
 			}
 		});
 		
+
 		function RigidShape(options) {
 			if(!options) { options = {}; }
 			
@@ -521,6 +577,7 @@
 			this.angle = (options.angle || new Vector2D());
 		}
 		$.extend(RigidShape.prototype, Shape.prototype);
+
 		
 		/* Interface */
 		/*function Influence() {}
@@ -528,6 +585,7 @@
 			generate: function() {
 			}
 		});*/
+
 		
 		function SwarmInfluence(swarm) {
 			this.swarm = swarm;		// QuadTree
@@ -570,6 +628,7 @@
 				return swarmForce;
 			}
 		});
+
 		
 		/* See Game Physics Engine Development, by Ian Millington */
 		function Particle(options) {
@@ -616,6 +675,7 @@
 			}
 		});
 		
+
 		function RigidBody(options) {
 			if(!options) { options = {}; }
 			
@@ -686,7 +746,6 @@
 	// }
 	
 	// ENTITIES {
-		
 		/* Template class
 			Update function must override the one of the physical body "Type" */
 		function Entity(Type, options) {
@@ -712,6 +771,7 @@
 		});
 		Entity.states = new Enum("spawn", "normal", "dead");
 		
+
 		function Firefly(options) {
 			if(!options) { options = {}; }
 
@@ -731,34 +791,45 @@
 													rad*Math.sin(Math.PI*v))));
 			}
 
-			this.shape = new Shape($.extend({}, options,
-				{ centerMass: this.pos, points: points }));
+			this.shape = new Shape({ centerMass: this.pos, points: points,
+				color: Color.fromRGBA(200, 200, 200, 0.7) });
+			
+			this.light = new Light({ rad: 50, pos: this.pos,
+				color: Color.fromRGBA(255, 255, 255, 0.75) });
 		}
 		$.extend(Firefly.prototype, Particle.prototype, Entity.prototype, {
 			update: function() { return this; },
-			move: function(force) {
-				this.force.doAdd(force*this.maxForce);
-				return this;
+			move: function(force, firefly) {
+				firefly = (firefly || this);
+				firefly.force.doAdd(force*firefly.maxForce);
+				return firefly;
 			},
-			aim: function(angle) {
-				return this;
+			aim: function(angle, firefly) {
+				firefly = (firefly || this);
+				//firefly.torque.doAdd(angle*firefly.maxTorque);
+				return firefly;
 			},
-			attack: function(active) {
-				return this;
+			attack: function(active, firefly) {
+				firefly = (firefly || this);
+				return firefly;
 			},
-			beam: function(active) {
-				return this;
+			beam: function(active, firefly) {
+				firefly = (firefly || this);
+				return firefly;
 			},
-			repel: function(active) {
-				return this;
+			repel: function(active, firefly) {
+				firefly = (firefly || this);
+				return firefly;
 			},
-			range: function(active) {
-				return this;
+			range: function(active, firefly) {
+				firefly = (firefly || this);
+				return firefly;
 			}
 		});
 		Firefly.states = $.extend({}, Entity.states,
 			new Enum("wander", "transition"));
 		
+
 		function Predator(options) {
 			if(!options) { options = {}; }
 			
@@ -781,8 +852,7 @@
 													rad*Math.sin(Math.PI*v))));
 			}
 
-			this.shape = new Shape($.extend({}, options,
-				{ centerMass: this.pos, points: points }));
+			this.shape = new Shape({ centerMass: this.pos, points: points });
 			
 			this.state = Predator.states.spawn;
 		}
@@ -809,16 +879,47 @@
 	// DEBUG {
 		
 		/* GUI for testing */
-		function addGUI() {
-			var gui = new DAT.GUI();
+		function addGUI(lumens) {
+			var gui = new dat.GUI(),
+				playerFolder = gui.addFolder("Player"),
+				predators = gui.addFolder("Predators"),
+
+				/* Note that the alpha can't be 1 to work with dat.GUI */
+				player = { color: lumens.player.shape.color.toRGBA() },
+				light = { color: lumens.player.light.color.toRGBA() };
 			
+			playerFolder.addColor(player, "color").onChange(function(c) {
+				lumens.player.shape.color.fromRGBA(c.r, c.g, c.b, c.a);
+			});
+
+			var lightFolder = playerFolder.addFolder("Light");
+
+			lightFolder.add(lumens.player.light, "rad", 0, 1000).listen();
+			lightFolder.addColor(light, "color").onChange(function(c) {
+				lumens.player.light.color.fromRGBA(c.r, c.g, c.b, c.a);
+			});
+
+			predators.add(lumens.settings.predators, "num", 0, 2000).listen()
+			.onChange(function(num) {
+				lumens.settings.predators.num = num |= 0;
+
+				while(num < lumens.swarm.length) {
+					var i = Math.random()*(lumens.swarm.length-1);
+					lumens.removePredator(lumens.swarm[i]);
+				}
+				while(num > lumens.swarm.length) { lumens.addPredator(); }
+			});
+
 			gui.close();
 		}
 	// }
-	
-	// MAIN {
-		function Renderer(canvas) {
-			this.canvas = canvas;
+
+	// COMPONENTS {
+		function Viewport(options) {
+			if(!options) { options = {}; }
+			
+			this.$canvas = $(options.canvas);
+			this.canvas = this.$canvas[0];
 			this.context = this.canvas.getContext('2d');
 			
 			this.shapes = [];
@@ -829,12 +930,26 @@
 
 			this.renderDone = new Watchable();
 			//this.running = true;
+
+			/* The minimum size - defines the resolution and
+				behaviour upon resizes and reorientations
+				Ensures that a square of this size is always visible,
+				with everything scaled to fit */
+			this.size = options.size;
+
+			// Setup width and height
+			this.resize();
+
+			// Position is central
+			Particle.call(this, options);
 		}
-		$.extend(Renderer.prototype, {
+		$.extend(Viewport.prototype, Particle.prototype, {
 			render: function() {
+				this.context.save();
+
 				/* Note: y axis goes downwards */
-				/* Clear */
-				this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+				/* Clear and resize */
+				this.resize();
 
 				/* Lit areas */
 				var litBodies = [];
@@ -859,35 +974,59 @@
 						}
 					}
 
-					light.draw(this.context);
+					light.render(this.context);
 				}
 
 				/* Bodies - only drawn in the light */
 				this.context.globalCompositeOperation = 'source-atop';
 
 				for(var lB = 0; lB < litBodies.length; ++lB) {
-					litBodies[lB].draw(this.context);
+					litBodies[lB].render(this.context);
 				}
 
 				/* Glowing cores - drawn everywhere */
 				this.context.globalCompositeOperation = 'destination-over';
 
 				for(var g = 0; g < this.glows.length; ++g) {
-					this.glows[g].draw(this.context);
+					this.glows[g].render(this.context);
 				}
 
+				this.context.restore();
 
 				/* Should be managed asynchronously from here,
 					as a web worker:
 				if(this.running) {
-					var renderer = this;
+					var viewport = this;
 					requestAnimationFrame(function() {
-						renderer.render();
+						viewport.render();
 					});
 				} */
 
 				this.renderDone.update();
+			},
+			resize: function() {
+				/* Fit everything to the screen in question,
+					maintaining aspect ratio */
+				var width = this.$canvas.width(), height = this.$canvas.height(),
+					aspect = width/height;
+				
+				if(aspect >= 1) {
+					this.height = this.size;
+					this.width = this.size*aspect;
+				}
+				else {
+					this.width = this.size;
+					this.height = this.size/aspect;
+				}
+
+				this.canvas.width = this.width;
+				this.canvas.height = this.height;
 			}
+
+			/* When limiting this to within the edges of the environment, there
+				may be cases when one of the environment's dimensions extends
+				beyond that of the viewport - throw in an animation of a hamster on a
+				wheel running the game, just to show you thought of it... */
 		});
 
 		function Controller(lumens) {
@@ -905,13 +1044,14 @@
 		}
 		$.extend(Controller.prototype, {
 			eventPos: function(e) {
-				var $viewport = this.lumens.$viewport, viewport = $viewport[0],
-					offset = $viewport.offset();
+				var $canvas = this.lumens.viewport.$canvas,
+					canvas = this.lumens.viewport.canvas,
+					offset = $canvas.offset();
 				
 				/* Note: the canvas element's dimensions are not the same as its context's dimensions */
 				return new Vector2D(
-					(e.pageX-offset.left)/$viewport.width()*viewport.width,
-					(e.pageY-offset.top)/$viewport.height()*viewport.height);
+					(e.pageX-offset.left)/$canvas.width()*canvas.width,
+					(e.pageY-offset.top)/$canvas.height()*canvas.height);
 			}
 		});
 		// Factory method
@@ -924,11 +1064,9 @@
 		function MKController(lumens) {
 			Controller.call(this, lumens);
 			
-			this.mousePos = null;	// Vector2D or null
+			this.mousePos = null;	// Vector2D or null - remember to draw a cursor here
 
 			// Bind events
-			var $viewport = this.lumens.$viewport;
-
 			/* By default, any input acts on the game
 				If other elements are on the page, then they must catch and
 				stop propogation of events meant for them
@@ -955,22 +1093,22 @@
 						move player and mouse/l, r aim (like a car) */
 					// left, a, j
 					case 37: case 65: case 74:
-						ctrl.events.move.thing(Vector2D(-1, 0));
+						ctrl.events.move.thing(new Vector2D(-1, 0));
 					break;
 					
 					// right, d, l
 					case 39: case 68: case 76:
-						ctrl.events.move.thing(Vector2D(1, 0));
+						ctrl.events.move.thing(new Vector2D(1, 0));
 					break;
 					
 					// up, w, i
 					case 38: case 87: case 73:
-						ctrl.events.move.thing(Vector2D(0, 1));
+						ctrl.events.move.thing(new Vector2D(0, 1));
 					break;
 					
 					// down, s, k
 					case 40: case 83: case 75:
-						ctrl.events.move.thing(Vector2D(0, -1));
+						ctrl.events.move.thing(new Vector2D(0, -1));
 					break;
 					
 					// space
@@ -1044,7 +1182,8 @@
 			this.bindings = [];	// { touch, event }
 
 			// Bind events
-			this.lumens.$viewport.off('.lumens').on(this.handlers, { ctrl: this });
+			this.lumens.viewport.$canvas.off('.lumens')
+				.on(this.handlers, { ctrl: this });
 		}
 		$.extend(TouchController.prototype, Controller.prototype, {
 			handlers: {
@@ -1113,13 +1252,18 @@
 						
 						if(binding) {
 							if(binding.event === ctrl.events.move) {
-								ctrl.move.move(ctrl.eventPos(touch));
-								ctrl.events.move.thing(thumbstick.vector());
+								ctrl.events.move.thing(
+									ctrl.move.move(ctrl.eventPos(touch)).vector());
 							}
 							else if(binding.event === ctrl.events.aim) {
-								ctrl.aim.move(ctrl.eventPos(touch));
-								ctrl.events.aim.thing(thumbstick.vector());
-								ctrl.events.attack.thing(true);
+								ctrl.events.aim.thing(
+									ctrl.aim.move(ctrl.eventPos(touch)).angle());
+								
+								// Only fire when at edge of thumbstick radius
+								if(ctrl.aim.vector().magSq() ===
+								ctrl.aim.rad*ctrl.aim.rad) {
+									ctrl.events.attack.thing(true);
+								}
 							}
 						}
 					}
@@ -1135,10 +1279,12 @@
 						
 						if(binding) {
 							if(binding.event === ctrl.events.move) {
+								ctrl.move.lift();
 								ctrl.events.move.thing(false);
 								ctrl.bindings.splice(ctrl.bindings.indexOf(binding), 1);
 							}
 							else if(binding.event === ctrl.events.aim) {
+								ctrl.aim.lift();
 								ctrl.events.aim.thing(false);
 								ctrl.events.attack.thing(false);
 								ctrl.bindings.splice(ctrl.bindings.indexOf(binding), 1);
@@ -1162,39 +1308,49 @@
 				}
 			}
 		});
+	// }
 
-		function Lumens($viewport) {
-			this.$viewport = (($viewport.jquery)? $viewport : $($viewport));
-
-			this.renderer = new Renderer(this.$viewport[0]);
-			this.controller = Controller.make(this);
-			//this.collider = new Collider();
-			//this.persistor = new Persistor();
-			//this.networker = new Networker();
+	// MAIN {
+		/* Manages the application, and represents the environment
+			(for convenience) */
+		function Lumens(options) {
+			if(!options) { options = {}; }
 			
-			this.settings = {
-				width: 0, height: 0,
-				player: { options: {} },
+			this.settings = $.extend(true, {
+				viewport: {
+					options: { canvas: canvas, mass: 20, size: Lumens.minSize }
+				},
+				player: { options: { mass: 10 } },
 				predators: {
-					num: 700,
+					num: 10,
 					options: {
 						neighbourRad: 30
 					}
 				}
-			};
+			}, options.settings);
 
 			this.time = Date.now();
 			this.state = Lumens.states.running;
+
+			this.width = (options.width || 0);
+			this.height = (options.height || 0);
 			
 			this.entities = [];
 			this.swarm = [];
 			
 			this.entityTree = new QuadTree({ x: 0, y: 0,
-					width: this.settings.width, height: this.settings.height },
+					width: this.width, height: this.height },
 				8, 10);
 			this.swarmTree = new QuadTree({ x: 0, y: 0,
-					width: this.settings.width, height: this.settings.height },
+					width: this.width, height: this.height },
 				8, 10);
+			
+			// TODO: one-way spring viewport->player
+			this.viewport = new Viewport(this.settings.viewport.options);
+			this.controller = Controller.make(this);
+			//this.collider = new Collider();
+			//this.persistor = new Persistor();
+			//this.networker = new Networker();
 			
 			this.player = new Firefly(this.settings.player.options);
 
@@ -1202,32 +1358,25 @@
 				new SwarmInfluence(this.swarmTree);
 			
 			for(var p = 0; p < this.settings.predators.num; ++p) {
-				this.entities.push(new Predator($.extend({},
-					this.settings.predators.options, {
-							pos: new Vector2D(Math.random()*
-									this.settings.width,
-								Math.random()*this.settings.height),
-							angle: new Vector2D(Math.random(),
-								Math.random()).doUnit()
-						})));
+				this.addPredator();
 			}
 
-			this.controller.events.move.watch(this.player.move);
-			this.controller.events.aim.watch(this.player.aim);
-			this.controller.events.attack.watch(this.player.attack);
-			this.controller.events.beam.watch(this.player.beam);
-			this.controller.events.repel.watch(this.player.repel);
-			this.controller.events.range.watch(this.player.range);
+			this.controller.events.move.watch(this.player.move, this.player);
+			this.controller.events.aim.watch(this.player.aim, this.player);
+			this.controller.events.attack.watch(this.player.attack, this.player);
+			this.controller.events.beam.watch(this.player.beam, this.player);
+			this.controller.events.repel.watch(this.player.repel, this.player);
+			this.controller.events.range.watch(this.player.range, this.player);
 
-			this.controller.events.pause.watch(this.pause);
+			this.controller.events.pause.watch(this.pause, this);
 			
 			/* If rendering is to be done asynchronously, a render tree
 				should be maintained for each render, while updates may
 				occur more frequently between these frames
 				Finer time steps for updates - Heavy deep copy of quadtree
-			this.renderer.renderDone.watch((function() {
-				this.renderer.shapes ... this.entities;
-				this.renderer.shapeTree ... this.entityTree;
+			this.viewport.renderDone.watch((function() {
+				this.viewport.shapes ... this.entities;
+				this.viewport.shapeTree ... this.entityTree;
 			}).call, this); */
 			
 			var lumens = this;
@@ -1274,27 +1423,68 @@
 					
 					/* Render */
 					/* Should be done asynchronously, through web workers:
-					// Render called in renderer
+					// Render called in viewport
 					if(this.running) {
 						setTimeout(this.step.call, 1000/60, this);
 					} */
 
-					this.renderer.render();
+					this.viewport.render();
 
 					var lumens = this;
 					requestAnimationFrame(function() { lumens.step(); });
 				}
 			},
-			pause: function(paused) {
-				if(this.state != Lumens.states.fin) {
-					this.state = Lumens.states[((paused)? 'paused' : 'running')];
+			pause: function(paused, lumens) {
+				lumens = (lumens || this);
+
+				if(lumens.state != Lumens.states.fin) {
+					lumens.state = Lumens.states[((paused)? 'paused' : 'running')];
 				}
+
+				return lumens;
+			},
+			addPredator: function() {
+				var predator = new Predator($.extend({},
+					this.settings.predators.options, {
+							pos: new Vector2D(Math.random()*this.width,
+								Math.random()*this.height),
+							angle: new Vector2D(Math.random(),
+								Math.random()).doUnit()
+						}));
+				
+				this.entities.push(predator);
+				this.swarm.push(predator);
+
+				return this;
+			},
+			removePredator: function(predator) {
+				this.swarm.splice(this.swarm.indexOf(predator), 1);
+				this.entities.splice(this.entities.indexOf(predator), 1);
+
+				return this;
+			},
+			generate: function() {
+				this.width = Lumens.minSize+
+						Lumens.minSize*Math.random()*Lumens.sizeFactor;
+				this.height = Lumens.minSize+
+					Lumens.minSize*Math.random()*Lumens.sizeFactor;
+				
+				return this;
 			}
+		});
+		$.extend(Lumens, {
+			generate: function(canvas) {
+				return new Lumens({ canvas: canvas }).generate();
+			},
+			minSize: 1080,
+			sizeFactor: 3
 		});
 		Lumens.states = new Enum('running', 'paused', 'fin');
 	// }
 
 	$(function() {
-		var lumens = new Lumens('#lumens');
+		var lumens = new Lumens().generate('#lumens');
+
+		addGUI(lumens);
 	});
 })(jQuery);
