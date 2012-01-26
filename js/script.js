@@ -263,14 +263,14 @@
 				if($.isArray(item)) {
 					var kids = [];
 					for(var i = 0; i < item.length; ++i) {
-						kids.concat(this.get(item[i]));
+						kids = kids.concat(this.get(item[i]));
 					}
 					return kids;
 				}
-				else if(this.nodes.length) {
-					return this.nodes[this.index(item)].get(item);
+				else {
+					return ((this.nodes.length)?
+						this.nodes[this.index(item)].get(item) : this.kids);
 				}
-				else { return this.kids; }
 			},
 			index: function(item) {
 				var left = (item.x <= this.boundRect.pos.x+this.boundRect.size.x/2);
@@ -359,15 +359,14 @@
 				
 				if($.isArray(item)) {
 					for(var i = 0; i < item.length; ++i) {
-						kids.concat(this.get(item[i]));
+						kids = kids.concat(this.get(item[i]));
 					}
 				}
-				else if(this.nodes.length) {
-					kids.concat(this.nodes[this.index(item)].get(item));
+				else {
+					kids = kids.concat(((this.nodes.length)?
+							this.nodes[this.index(item)].get(item) : this.kids),
+						this.borderKids);
 				}
-				else { kids.concat(this.kids); }
-				
-				kids.concat(this.borderKids);
 				
 				return kids;
 			},
@@ -650,52 +649,71 @@
 
 		
 		/* Interface */
-		/*function Influence() {}
-		$.extend(Influencer.prototype, {
-			generate: function() {
-			}
-		});*/
+		/*function Influence(...) {...}
+		Influence.prototype.generate = function(...) {...}*/
+
+
+		function SpringInfluence() {}
+		SpringInfluence.prototype.generate = function() {
+		};
+
+		
+		// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
+		function WanderInfluence() {}
+		WanderInfluence.prototype.generate = function(range, minVel) {
+			/* Range is proportional to the distance either side of the current
+				heading within which the entity may wander (radius of wander circle)
+				minVel is the minimum velocity vector which wandering may produce
+				(distance wander circle is ahead of the entity) */
+			var angle = Math.random()*2*Math.PI;
+			return minVel.add(new Vec2D(range*Math.cos(angle),
+				range*Math.sin(angle)));
+		};
 
 		
 		function SwarmInfluence(swarm) {
 			this.swarm = swarm;		// QuadTree
 		}
-		$.extend(SwarmInfluence.prototype, {
-			generate: function(member, rad, weight) {
-				var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
-					totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
-					
-					neighbours = this.swarm.get(
-						(new Circle(member.pos.copy(), rad)).containingAARect()),
-					
-					num = 0;
+		SwarmInfluence.prototype.generate = function(member, rad, weight) {
+			var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
+				totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
 				
-				for(var n = 0; n < neighbours.length; ++n) {
-					var neighbour = neighbours[n].item;
-					
-					if(member !== neighbour) {
-						var dist = member.pos.dist(neighbour.pos);
+				neighbours = this.swarm.get(
+					(new Circle(member.pos.copy(), rad)).containingAARect()),
+				
+				num = 0;
+			
+			for(var n = 0; n < neighbours.length; ++n) {
+				var neighbour = neighbours[n].item;
+				
+				if(member !== neighbour) {
+					var dist = member.pos.dist(neighbour.pos);
+
+					if(dist && dist < rad) {
+						++num;
+
+						totalSeparation.doAdd(member.pos.sub(neighbour.pos)
+							.doUnit().doScale(1/dist));
 						
-						if(dist < rad) {
-							++num;
-							totalSeparation.doAdd(member.pos.sub(neighbour.pos)
-								.doUnit().doScale(1/dist));
-							totalCohesion.doAdd(neighbour.pos);
-							totalAlignment.doAdd(neighbour.vel.unit());
-						}
+						totalCohesion.doAdd(neighbour.pos);
+						
+						var alignment = (neighbour.angle ||
+							((neighbour.vel)? neighbour.vel.unit() : null));
+						
+						if(alignment) { totalAlignment.doAdd(alignment); }
 					}
 				}
-				
-				if(num) {
-					swarmForce.doAdd(totalSeparation.scale(weight.separation))
-						.doAdd(totalCohesion.scale(weight.cohesion))
-						.doAdd(totalAlignment.scale(weight.alignment))
-						.doScale(1/num);
-				}
-				
-				return swarmForce;
 			}
-		});
+			
+			if(num) {
+				swarmForce.doAdd(totalSeparation.doScale(weight.separation))
+					.doAdd(totalCohesion.doScale(weight.cohesion))
+					.doAdd(totalAlignment.doScale(weight.alignment))
+					.doScale(1/num);
+			}
+			
+			return swarmForce;
+		};
 
 		
 		/* See Game Physics Engine Development, by Ian Millington */
@@ -926,6 +944,8 @@
 			/* Particle entity template */
 			/* TODO: change to RigidBody */
 			Entity.call(this, Particle, options);
+
+			this.wanderInfluence = (options.wanderInfluence || new WanderInfluence());
 			
 			this.swarmInfluence = options.swarmInfluence;
 
@@ -933,9 +953,11 @@
 			this.weight = (options.weight || { separation: 0.25,
 				cohesion: 0.25, alignment: 0.25, wander: 0.25 });
 			
+			this.wander = (options.wander || { range: 10, minSpeed: 20 });
+			
 			/* Set up the shape */
 			/* TODO: change to RigidShape */
-			var points = [], num = 10, rad = 20, v = 0, end = 2, i = end/(num-1);
+			var points = [], num = 10, rad = 10, v = 0, end = 2, i = end/(num-1);
 
 			for(var p = 0; p < num; v += i, ++p) {
 				points.push(this.pos.add(new Vec2D(rad*Math.cos(Math.PI*v),
@@ -952,7 +974,16 @@
 				case Predator.states.passive: case Predator.states.aggressive:
 				case Predator.states.normal:
 					this.force.doAdd(this.swarmInfluence
-						.generate(this, this.neighbourRad, this.weight));
+						.generate(this, this.neighbourRad, this.weight))
+					.doAdd(this.wanderInfluence.generate(this.wander.range,
+							((this.vel.magSq())?
+									this.vel.unit()
+								:	(function() {
+										var angle = Math.random()*2*Math.PI;
+										return new Vec2D(Math.cos(angle),
+											Math.sin(angle));
+									})()).doScale(this.wander.minSpeed))
+							.doScale(this.weight.wander));
 				break;
 				
 				default:
@@ -972,7 +1003,7 @@
 		function addGUI(lumens) {
 			var gui = new dat.GUI(),
 				playerFolder = gui.addFolder("Player"),
-				predators = gui.addFolder("Predators"),
+				predatorFolder = gui.addFolder("Predators"),
 
 				/* Note that the alpha can't be 1 to work with dat.GUI */
 				player = { color: lumens.player.shape.color.toRGBA() },
@@ -991,15 +1022,40 @@
 				lumens.player.light.color.fromRGBA(c.r, c.g, c.b, c.a);
 			});
 
-			predators.add(lumens.settings.predators, "num", 0, 2000).listen()
+			var predSett = lumens.settings.predators;
+
+			predatorFolder.add(predSett, "num", 0, 2000).listen()
 			.onChange(function(num) {
-				lumens.settings.predators.num = num |= 0;
+				predSett.num = num |= 0;
 
 				while(num < lumens.swarm.length) {
 					var i = Math.random()*(lumens.swarm.length-1);
 					lumens.removePredator(lumens.swarm[i]);
 				}
 				while(num > lumens.swarm.length) { lumens.addPredator(); }
+			});
+
+			var swarmFolder = predatorFolder.addFolder("Swarm");
+
+			function setWeight(weight, influence) {
+				predSett.options.weight[influence] = weight;
+
+				for(var p = 0; p < lumens.swarm.length; ++p) {
+					lumens.swarm[p].weight[influence] = weight;
+				}
+			}
+
+			swarmFolder.add(predSett.options.weight, "separation", 0, 100)
+			.step(0.05).listen().onChange(function(weight) {
+				setWeight(weight, "separation");
+			});
+			swarmFolder.add(predSett.options.weight, "cohesion", 0, 100)
+			.step(0.05).listen().onChange(function(weight) {
+				setWeight(weight, "cohesion");
+			});
+			swarmFolder.add(predSett.options.weight, "alignment", 0, 100)
+			.step(0.05).listen().onChange(function(weight) {
+				setWeight(weight, "alignment");
 			});
 
 			//gui.close();
@@ -1013,8 +1069,6 @@
 			if(!options) { options = {}; }
 
 			Particle.call(this, options);
-
-			this.lumens = options.lumens;
 			
 			this.$canvas = $(options.canvas);
 			this.canvas = this.$canvas[0];
@@ -1028,7 +1082,7 @@
 
 			this.boundRect = new AARect();
 
-			this.shapeTree = null;	// QuadTree
+			this.shapeTree = null;	// QuadTree, only concerned with the shapes
 
 			// Setup size and shapeTree
 			this.setup();
@@ -1060,10 +1114,10 @@
 								light.rad)).containingAARect()) : null);
 					
 					for(var n = 0; n < neighbours.length; ++n) {
-						var neighbour = neighbours[n];
+						var neighbour = neighbours[n].item;
 
 						if(neighbour.boundRad.intersects(light)) {
-							litBodies.push(neighbour.shape);
+							litBodies.push(neighbour);
 						}
 					}
 
@@ -1452,15 +1506,20 @@
 			(for convenience) */
 		function Lumens(options) {
 			if(!options) { options = {}; }
-			
+
 			this.settings = $.extend(true, {
-				size: new Vec2D(),
+				size: new Vec2D(Lumens.minSize, Lumens.minSize),
 				viewport: { mass: 20, size: Lumens.minSize },
 				player: { mass: 10 },
 				// for testing - don't want to set it this way permanently
 				predators: {
 					num: 10,
-					options: { neighbourRad: 30 }
+					options: {
+						neighbourRad: 60,
+						weight: { separation: 0.25, cohesion: 0.25,
+							alignment: 0.25, wander: 0.25 },
+						wanderInfluence: new WanderInfluence()
+					}
 				}
 			}, options);
 
@@ -1481,7 +1540,6 @@
 			
 			this.player = new Firefly(this.settings.player);
 			this.entities.push(this.player);
-			this.swarm.push(this.player);
 				
 			// TODO: one-way spring viewport->player
 			this.viewport = new Viewport(this.settings.viewport);
@@ -1529,7 +1587,9 @@
 					/* Resolve everything */
 					for(var r = 0; r < this.entities.length; ++r) {
 						var entity = this.entities[r].resolve(dt),
-							treeItem = this.treeItem(entity);
+							treeItem = entity.shape.boundRad.containingAARect();
+						
+						treeItem.item = entity;
 						
 						/* Populate Quadtrees */
 						this.entityTree.add(treeItem);
@@ -1567,15 +1627,16 @@
 
 				for(var r = 0; r < this.entities.length; ++r) {
 					var entity = this.entities[r],
-						treeItem = this.treeItem(entity);
+						treeItem = entity.shape.boundRad.containingAARect();
 
-					if(entity.shape) {
+					treeItem.item = entity.shape;
+
+					if(this.viewport.shapeTree.root.boundRect
+						.contains(treeItem)) {
 						this.viewport.shapes.push(entity.shape);
-						if(this.viewport.shapeTree.root.boundRect
-							.contains(treeItem)) {
-							this.viewport.shapeTree.add(treeItem);
-						}
+						this.viewport.shapeTree.add(treeItem);
 					}
+
 					if(entity.light) { this.viewport.lights.push(entity.light); }
 					if(entity.glow) { this.viewport.glows.push(entity.glow); }
 				}
@@ -1612,11 +1673,6 @@
 
 				return this;
 			},
-			treeItem: function(entity) {
-				var rect = entity.shape.boundRad.containingAARect();
-				rect.item = entity;
-				return rect;
-			},
 			generate: function() {
 				this.constructor($.extend(true, this.settings, {
 					size: new Vec2D(Lumens.minSize+
@@ -1640,7 +1696,7 @@
 	// }
 
 	$(function() {
-		var lumens = new Lumens({ viewport: { canvas: '#lumens' } }).generate();
+		var lumens = new Lumens({ viewport: { canvas: '#lumens' } });
 
 		addGUI(lumens);
 	});
