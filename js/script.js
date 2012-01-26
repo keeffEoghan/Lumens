@@ -56,56 +56,66 @@
 				return this;
 			}
 		});
+
 		
 		function Vec2D(x, y) { this.x = (x || 0); this.y = (y || 0); }
 		$.extend(Vec2D.prototype, {
 			/* Accessors */
 			
-			add: function(v) { return this.copy().doAdd(v); },
+			add: function(other) { return this.copy().doAdd(other); },
 			
-			angleAbs: function(v) {
-				var prodMag = Math.sqrt(this.mag2()*v.mag2());
-				if(magProd) { return Math.acos(this.dot(v)/prodMag); }
+			angleAbs: function(other) {
+				var prodMag = Math.sqrt(this.mag2()*other.mag2());
+				if(magProd) { return Math.acos(this.dot(other)/prodMag); }
 				else { $.error("Vec2D Error: getting angle with zero vector"); }
 			},
 			
-			angleRel: function(v) { return Math.atan2(this.dot(v.perp()), this.dot(v)); },
+			angleRel: function(other) {
+				return Math.atan2(this.dot(other.perp()), this.dot(other));
+			},
 			
-			copy: function() { return new this.constructor(this.x, this.y); },
+			copy: function(other) {
+				if(other) { this.x = other.x; this.y = other.y; return this; }
+				else { return new this.constructor(this.x, this.y); }
+			},
 			
-			dist: function(v) { return Math.sqrt(this.distSq(v)); },
+			dist: function(other) { return Math.sqrt(this.distSq(other)); },
 			
-			distSq: function(v) { var x = v.x-this.x, y = v.y-this.y; return x*x+y*y; },
+			distSq: function(other) {
+				var x = other.x-this.x, y = other.y-this.y; return x*x+y*y;
+			},
 			
-			dot: function(v) { return this.x*v.x+this.y*v.y; },
+			dot: function(other) { return this.x*other.x+this.y*other.y; },
 			
-			equals: function(v) { return (this.x === v.x && this.y === v.y); },
+			equals: function(other) {
+				return (this.x === other.x && this.y === other.y);
+			},
 			
 			mag: function() { return Math.sqrt(this.magSq()); },
 			
 			magSq: function() { return this.x*this.x+this.y*this.y; },
 			
-			mult: function(v) { return this.copy().doMult(v); },
+			mult: function(other) { return this.copy().doMult(other); },
 			
 			perp: function() { return this.copy().doPerp(); },
 			
 			scale: function(m) { return this.copy().doScale(m); },
 			
-			sub: function(v) { return this.copy().doSub(v); },
+			sub: function(other) { return this.copy().doSub(other); },
 			
 			unit: function() { return this.copy().doUnit(); },
 			
 			/* Mutators */
 			
-			doAdd: function(v) { this.x += v.x; this.y += v.y; return this; },
+			doAdd: function(other) { this.x += other.x; this.y += other.y; return this; },
 			
-			doMult: function(v) { this.x *= v.x; this.y *= v.y; return this; },
+			doMult: function(other) { this.x *= other.x; this.y *= other.y; return this; },
 			
 			doPerp: function() { var x = this.x; this.x = -this.y; this.y = x; return this; },
 			
 			doScale: function(m) { this.x *= m; this.y *= m; return this; },
 			
-			doSub: function(v) { this.x -= v.x; this.y -= v.y; return this; },
+			doSub: function(other) { this.x -= other.x; this.y -= other.y; return this; },
 			
 			doUnit: function() {
 				var mag = this.mag();
@@ -115,6 +125,7 @@
 			
 			doZero: function() { this.x = this.y = 0; return this; }
 		});
+
 
 		function AARect(pos, size) {
 			this.pos = (pos || new Vec2D());
@@ -138,10 +149,18 @@
 						this.pos.y+this.size.y/2),
 					Math.max(this.size.x, this.size.y));
 			},
-			copy: function() {
-				return new this.constructor(this.pos.copy(), this.size.copy());
+			copy: function(other) {
+				if(other) {
+					this.pos.copy(other.pos);
+					this.size.copy(other.size);
+					return this;
+				}
+				else {
+					return new this.constructor(this.pos.copy(), this.size.copy());
+				}
 			}
 		});
+
 
 		function Circle(pos, rad) {
 			this.pos = (pos || new Vec2D());
@@ -181,10 +200,22 @@
 					new Vec2D(this.pos.x+this.rad,
 						this.pos.y+this.rad));
 			},
-			copy: function() {
-				return new this.constructor(this.pos.copy(), this.rad);
+			copy: function(other) {
+				if(other) {
+					this.pos.copy(other.pos); this.rad = other.rad;
+					this.radSq = other.radSq; return this;
+				}
+				else {
+					return new this.constructor(this.pos.copy(), this.rad);
+				}
+			},
+			trace: function(context) {
+				context.beginPath();
+				context.arc(this.pos.x, this.pos.y, this.rad, 0, 2*Math.PI);
+				return this;
 			}
 		});
+
 		
 		function Enum() {
 			for(var i = 0; i < arguments.length; ++i) { this[arguments[i]] = i; }
@@ -228,6 +259,7 @@
 			clear: function() { return this.root.clear(); },
 			get: function(item) { return this.root.get(item).slice(0); }
 		});
+
 
 		function Node(boundRect, depth, maxDepth, maxKids) {
 			this.boundRect = boundRect;
@@ -324,6 +356,7 @@
 		Node.corners = new Enum("topLeft", "topRight",
 			"bottomLeft", "bottomRight");
 		
+		
 		function BoundsNode(boundRect, depth, maxDepth, maxKids) {
 			Node.apply(this, arguments);
 			this.borderKids = [];
@@ -376,6 +409,7 @@
 				return Node.prototype.clear.call(this);
 			}
 		});
+
 		
 		/* Conversion functions adapted from Michael Jackson's (really) - http://mjijackson.com/2008/02/rgb-to-hsl-and-rgb-to-hsv-color-model-conversion-algorithms-in-javascript */
 		function Color() {
@@ -470,28 +504,30 @@
 			}
 		});
 
+
 		// For touchscreen devices
-		function Thumbstick(radius, unit) {
-			if(!radius) { $.error("Thumbstick error: cannot have zero radius"); }
-			this.rad = radius;
+		function Thumbstick(rad, unit) {
+			if(!rad) { $.error("Thumbstick error: cannot have zero radius"); }
+
+			this.boundRad = new Circle(null, rad);
+			this.input = null;	// Vec2D
+
 			this.unit = unit;
-			this.center = null;	// Vec2D
-			this.pos = null;	// Vec2D
 		}
 		$.extend(Thumbstick.prototype, {
 			place: function(v) {
-				this.center = v.copy();
-				this.pos = v.copy();
+				this.boundRad.pos = v.copy();
+				this.input = v.copy();
 				return this;
 			},
 			move: function(v) {
-				this.pos = v;
+				this.input = v.copy();
 
 				var vector = this.vector();
-				if(vector.magSq() > this.rad*this.rad) {
+				if(vector.magSq() > this.boundRad.rad*this.boundRad.rad) {
 					// Pin to range
-					this.pos = vector.doUnit().doScale(this.rad)
-						.doAdd(this.center);	// Makes relative vector absolute
+					this.input = vector.doUnit().doScale(this.boundRad.rad)
+						.doAdd(this.boundRad.pos);	// Makes relative vector absolute
 				}
 
 				return this;
@@ -501,14 +537,16 @@
 				return this;
 			},
 			vector: function() {
-				if(!this.rad) { $.error("Thumbstick error: cannot have zero radius"); }
-				return this.pos.sub(this.center).doScale(1/this.rad);
+				if(!this.boundRad.rad) { $.error("Thumbstick error: cannot have zero radius"); }
+				return this.input.sub(this.boundRad.pos)
+					.doScale(1/this.boundRad.rad);
 			},
 			angle: function() {
-				if(!this.rad) { $.error("Thumbstick error: cannot have zero radius"); }
-				return this.pos.sub(this.center).doUnit();
+				if(!this.boundRad.rad) { $.error("Thumbstick error: cannot have zero radius"); }
+				return this.input.sub(this.boundRad.pos).doUnit();
 			},
 			render: function(context) {
+				// unit stuff here...
 				return this;
 			}
 		});
@@ -543,6 +581,22 @@
 					context.restore();
 				}
 
+				return this;
+			}
+		});
+
+
+		function Spotlight(options) {
+			if(!options) { options = {}; }
+			
+			Light.call(this, options);
+
+			this.target = (options.target || new Vec2D());
+		}
+		$.extend(SpotLight.prototype, Light.prototype, {
+			render: function(context) {
+				/* TODO: WebGL - render from pos point to circle with
+					center target and radius rad */
 				return this;
 			}
 		});
@@ -648,71 +702,72 @@
 		$.extend(RigidShape.prototype, Shape.prototype);
 
 		
-		/* Interface */
-		/*function Influence(...) {...}
-		Influence.prototype.generate = function(...) {...}*/
-
-
-		function SpringInfluence() {}
-		SpringInfluence.prototype.generate = function() {
-		};
-
-		
-		// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
-		function WanderInfluence() {}
-		WanderInfluence.prototype.generate = function(range, minVel) {
-			/* Range is proportional to the distance either side of the current
-				heading within which the entity may wander (radius of wander circle)
-				minVel is the minimum velocity vector which wandering may produce
-				(distance wander circle is ahead of the entity) */
-			var angle = Math.random()*2*Math.PI;
-			return minVel.add(new Vec2D(range*Math.cos(angle),
-				range*Math.sin(angle)));
-		};
-
-		
-		function SwarmInfluence(swarm) {
-			this.swarm = swarm;		// QuadTree
-		}
-		SwarmInfluence.prototype.generate = function(member, rad, weight) {
-			var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
-				totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
+		var Influence = {
+			// Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target)
+			spring: function(options) {
+				var force = options.posTo.sub(options.posFrom),
+					length = force.mag();
 				
-				neighbours = this.swarm.get(
-					(new Circle(member.pos.copy(), rad)).containingAARect()),
+				return force.doScale(options.factor*
+					Math.abs(length-options.restLength)/length);
+			},
+			// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
+			// Number range, Vec2D vel
+			wander: function(options) {
+				/* range is proportional to the distance either side of the current
+					heading within which the entity may wander (radius of wander circle)
+					vel is the minimum velocity vector which wandering may produce
+					(distance wander circle is ahead of the entity) */
+				var angle = Math.random()*2*Math.PI;
+				return options.vel.add(new Vec2D(options.range*Math.cos(angle),
+					options.range*Math.sin(angle)));
+			},
+			// QuadTree swarm, Particle member, Number neighbourRad, { Number separation, Number alignment, Number cohesion } weight
+			swarm: function(options) {
+				var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
+					totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
+					
+					neighbours = this.swarm.get(
+						(new Circle(options.member.pos.copy(),
+							options.neighbourRad)).containingAARect()),
+					
+					num = 0;
 				
-				num = 0;
-			
-			for(var n = 0; n < neighbours.length; ++n) {
-				var neighbour = neighbours[n].item;
-				
-				if(member !== neighbour) {
-					var dist = member.pos.dist(neighbour.pos);
+				for(var n = 0; n < neighbours.length; ++n) {
+					var neighbour = neighbours[n].item;
+					
+					if(options.member !== neighbour) {
+						var vector = options.member.pos.sub(neighbour.pos),
+							dist = vector.mag();
 
-					if(dist && dist < rad) {
-						++num;
+						if(dist < options.neighbourRad) {
+							++num;
 
-						totalSeparation.doAdd(member.pos.sub(neighbour.pos)
-							.doUnit().doScale(1/dist));
-						
-						totalCohesion.doAdd(neighbour.pos);
-						
-						var alignment = (neighbour.angle ||
-							((neighbour.vel)? neighbour.vel.unit() : null));
-						
-						if(alignment) { totalAlignment.doAdd(alignment); }
+							if(dist) {
+								totalSeparation.doAdd(vector.doUnit()
+									.doScale(1/dist));
+							}
+							
+							totalCohesion.doAdd(neighbour.pos);
+							
+							var alignment = (neighbour.angle ||
+								((neighbour.vel.magSq())?
+									neighbour.vel.unit() : null));
+							
+							if(alignment) { totalAlignment.doAdd(alignment); }
+						}
 					}
 				}
+				
+				if(num) {
+					swarmForce.doAdd(totalSeparation.doScale(options.weight.separation))
+						.doAdd(totalCohesion.doScale(options.weight.cohesion))
+						.doAdd(totalAlignment.doScale(options.weight.alignment))
+						.doScale(1/num);
+				}
+				
+				return swarmForce;
 			}
-			
-			if(num) {
-				swarmForce.doAdd(totalSeparation.doScale(weight.separation))
-					.doAdd(totalCohesion.doScale(weight.cohesion))
-					.doAdd(totalAlignment.doScale(weight.alignment))
-					.doScale(1/num);
-			}
-			
-			return swarmForce;
 		};
 
 		
@@ -759,14 +814,11 @@
 				return this;
 			},
 			mass: function(mass) {
-				if(mass) {
-					this.invMass = ((mass > 0)? 1/mass : Number.MIN_VALUE);
+				if(mass !== undefined) {
+					this.invMass = 1/mass;
 					return this;
 				}
-				else {
-					return ((this.invMass > 0)? 1/this.invMass
-						:	Number.POSITIVE_INFINITY);
-				}
+				else { return 1/this.invMass; }
 			}
 		});
 		
@@ -835,13 +887,11 @@
 			
 			inertiaTensor: function(inertiaTensor) {
 				if(inertiaTensor) {
-					this.invInertiaTensor = ((inertiaTensor > 0)?
-						1/inertiaTensor : Number.MIN_VALUE);
+					this.invInertiaTensor = 1/inertiaTensor;
 					return this;
 				}
 				else {
-					return ((this.invInertiaTensor > 0)?
-						1/this.invInertiaTensor : Number.POSITIVE_INFINITY);
+					return 1/this.invInertiaTensor;
 				}
 			}
 		});
@@ -945,15 +995,13 @@
 			/* TODO: change to RigidBody */
 			Entity.call(this, Particle, options);
 
-			this.wanderInfluence = (options.wanderInfluence || new WanderInfluence());
+			this.wanderInfluence = (options.wanderInfluence ||
+				{ range: 10, minSpeed: 20, weight: 0.25 });
 			
-			this.swarmInfluence = options.swarmInfluence;
-
-			this.neighbourRad = options.neighbourRad;
-			this.weight = (options.weight || { separation: 0.25,
-				cohesion: 0.25, alignment: 0.25, wander: 0.25 });
-			
-			this.wander = (options.wander || { range: 10, minSpeed: 20 });
+			this.swarmInfluence = (options.swarmInfluence || {
+				swarm: null, member: this, neighbourRad: 60,
+				weight: { separation: 0.25, cohesion: 0.25, alignment: 0.25 }
+			});
 			
 			/* Set up the shape */
 			/* TODO: change to RigidShape */
@@ -973,17 +1021,20 @@
 				switch(this.state) {
 				case Predator.states.passive: case Predator.states.aggressive:
 				case Predator.states.normal:
-					this.force.doAdd(this.swarmInfluence
-						.generate(this, this.neighbourRad, this.weight))
-					.doAdd(this.wanderInfluence.generate(this.wander.range,
-							((this.vel.magSq())?
-									this.vel.unit()
-								:	(function() {
-										var angle = Math.random()*2*Math.PI;
-										return new Vec2D(Math.cos(angle),
-											Math.sin(angle));
-									})()).doScale(this.wander.minSpeed))
-							.doScale(this.weight.wander));
+					if(this.vel.magSq()) {
+						this.wanderInfluence.vel = this.vel.unit()
+							.doScale(this.wanderInfluence.minSpeed);
+					}
+					else {
+						var angle = Math.random()*2*Math.PI;
+						this.wanderInfluence.vel =
+							(new Vec2D(Math.cos(angle), Math.sin(angle)))
+								.doScale(this.wanderInfluence.minSpeed);
+					}
+					
+					this.force.doAdd(Influence.swarm(this.swarmInfluence))
+						.doAdd(Influence.wander(this.wanderInfluence)
+							.doScale(this.wanderInfluence.weight));
 				break;
 				
 				default:
@@ -1038,10 +1089,10 @@
 			var swarmFolder = predatorFolder.addFolder("Swarm");
 
 			function setWeight(weight, influence) {
-				predSett.options.weight[influence] = weight;
+				predSett.options.swarmInfluence.weight[influence] = weight;
 
 				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].weight[influence] = weight;
+					lumens.swarm[p].swarmInfluence.weight[influence] = weight;
 				}
 			}
 
@@ -1069,23 +1120,29 @@
 			if(!options) { options = {}; }
 
 			Particle.call(this, options);
+
+			/* The minimum bounds - defines the resolution and
+				behaviour upon resizes and reorientations, and
+				ensures that an area of this size is always visible,
+				with everything scaled to fit */
+			this.minRect = new AARect(this.pos, options.size);
+
+			/* The actual bounds - collisions done against the dimensions of
+				this when the respective environment dimension is larger */
+			this.boundRect = new AARect();
+
+			this.shapeTree = null;	// QuadTree, only concerned with the shapes
 			
 			this.$canvas = $(options.canvas);
 			this.canvas = this.$canvas[0];
 			this.context = this.canvas.getContext('2d');
 
-			/* The minimum size - defines the resolution and
-				behaviour upon resizes and reorientations
-				Ensures that a square of this size is always visible,
-				with everything scaled to fit */
-			this.size = options.size;
-
-			this.boundRect = new AARect();
-
-			this.shapeTree = null;	// QuadTree, only concerned with the shapes
+			this.springInfluence = (options.springInfluence || {
+				posFrom: null, posTo: null, factor: 0.5, restLength: 0
+			});
 
 			// Setup size and shapeTree
-			this.setup();
+			this.update();
 			
 			this.shapes = (options.shapes || []);
 			this.lights = (options.lights || []);
@@ -1094,7 +1151,7 @@
 			this.renderDone = new Watchable();
 			//this.running = true;
 
-			/* In a render cycle, first setup is called to clear and resize
+			/* In a render cycle, first update is called to clear and resize
 				the canvas, then the render-lists are populated, followed by a
 				call to render, which calls clear at the end */
 		}
@@ -1154,33 +1211,33 @@
 
 				return this;
 			},
-			setup: function() {
+			update: function() {
 				/* Fit everything to the screen in question,
 					maintaining aspect ratio */
 				var width = this.$canvas.width(), height = this.$canvas.height(),
 					aspect = width/height;
 				
 				if(aspect >= 1) {
-					this.canvas.height = this.size;
-					this.canvas.width = this.size*aspect;
+					this.canvas.height = this.minRect.size.x;
+					this.canvas.width = this.minRect.size.y*aspect;
 				}
 				else {
-					this.canvas.width = this.size;
-					this.canvas.height = this.size/aspect;
+					this.canvas.width = this.minRect.size.x;
+					this.canvas.height = this.minRect.size.y/aspect;
 				}
 
-				var margin = new Vec2D((this.canvas.width-this.size)/2,
-					(this.canvas.height-this.size)/2);
+				var size = new Vec2D(this.canvas.width, this.canvas.height),
+					margin = size.sub(this.minRect.size).doScale(0.5);
 				
-				this.boundRect.pos = this.pos.sub(margin);
-				this.boundRect.size.constructor(
-					this.canvas.width, this.canvas.height);
+				this.boundRect.copy(this.pos.sub(margin),
+					this.minRect.size.add(margin));
 
-				// Position of "size" square is centered in the canvas
-				var translate = this.pos.add(margin);
-				this.context.translate(translate.x, translate.y);
+				// Position of minRect is centered in the canvas
+				this.context.translate(margin.x, margin.y);
 
 				this.shapeTree = new QuadTree(this.boundRect.copy(), 8, 10);
+				
+				this.force.doAdd(Influence.spring());
 
 				return this;
 			},
@@ -1396,12 +1453,12 @@
 						}
 
 						// Place thumbsticks
-						else if(!ctrl.move.center) {
+						else if(!ctrl.move.input) {
 							ctrl.move.place(touchPos);
 							ctrl.bindings.push({ touch: touch,
 								event: ctrl.events.move });
 						}
-						else if(!ctrl.aim.center) {
+						else if(!ctrl.aim.input) {
 							ctrl.aim.place(touchPos);
 							ctrl.bindings.push({ touch: touch,
 								event: ctrl.events.aim });
@@ -1410,8 +1467,8 @@
 						// Activate enhanced modes
 						else if(!ctrl.events.range.thing() &&
 						!ctrl.events.repel.thing()) {
-							var moveDistSq = touchPos.distSq(ctrl.move.center),
-								aimDistSq = touchPos.distSq(ctrl.aim.center);
+							var moveDistSq = touchPos.distSq(ctrl.move.boundRad.pos),
+								aimDistSq = touchPos.distSq(ctrl.aim.boundRad.pos);
 							
 							if(moveDistSq < aimDistSq) {
 								ctrl.bindings.push({ touch: touch,
@@ -1452,7 +1509,7 @@
 								
 								// Only fire when at edge of thumbstick radius
 								if(ctrl.aim.vector().magSq() ===
-								ctrl.aim.rad*ctrl.aim.rad) {
+								ctrl.aim.boundRad.rad*ctrl.aim.boundRad.rad) {
 									ctrl.events.attack.thing(true);
 								}
 							}
@@ -1508,17 +1565,20 @@
 			if(!options) { options = {}; }
 
 			this.settings = $.extend(true, {
-				size: new Vec2D(Lumens.minSize, Lumens.minSize),
-				viewport: { mass: 20, size: Lumens.minSize },
+				size: Lumens.minSize,
+				viewport: {
+					mass: 20, size: Lumens.minSize,
+					springInfluence: { factor: 0.5, restLength: 0 }
+				},
 				player: { mass: 10 },
 				// for testing - don't want to set it this way permanently
 				predators: {
 					num: 10,
 					options: {
-						neighbourRad: 60,
-						weight: { separation: 0.25, cohesion: 0.25,
-							alignment: 0.25, wander: 0.25 },
-						wanderInfluence: new WanderInfluence()
+						swarmInfluence: {
+							swarm: null, member: this, neighbourRad: 60,
+							weight: { separation: 0.25, cohesion: 0.25, alignment: 0.25 }
+						}
 					}
 				}
 			}, options);
@@ -1531,8 +1591,7 @@
 			this.entityTree = new QuadTree(new AARect(null, this.size.copy()), 8, 10);
 			this.swarmTree = new QuadTree(new AARect(null, this.size.copy()), 8, 10);
 
-			this.settings.predators.options.swarmInfluence =
-				new SwarmInfluence(this.swarmTree);
+			this.settings.predators.options.swarmInfluence.swarm = this.swarmTree;
 			
 			for(var p = 0; p < this.settings.predators.num; ++p) {
 				this.addPredator();
@@ -1540,6 +1599,8 @@
 			
 			this.player = new Firefly(this.settings.player);
 			this.entities.push(this.player);
+
+			this.settings.viewport.springInfluence.posTo = this.player.pos;
 				
 			// TODO: one-way spring viewport->player
 			this.viewport = new Viewport(this.settings.viewport);
@@ -1614,6 +1675,9 @@
 					} */
 				}
 
+				/* Clear and resize */
+				this.viewport.update();
+
 				this.render();
 
 				var lumens = this;
@@ -1622,9 +1686,6 @@
 				return this;
 			},
 			render: function() {
-				/* Clear and resize */
-				this.viewport.setup();
-
 				for(var r = 0; r < this.entities.length; ++r) {
 					var entity = this.entities[r],
 						treeItem = entity.shape.boundRad.containingAARect();
@@ -1632,7 +1693,7 @@
 					treeItem.item = entity.shape;
 
 					if(this.viewport.shapeTree.root.boundRect
-						.contains(treeItem)) {
+						.intersects(treeItem)) {
 						this.viewport.shapes.push(entity.shape);
 						this.viewport.shapeTree.add(treeItem);
 					}
@@ -1653,12 +1714,13 @@
 				return lumens;
 			},
 			addPredator: function() {
-				var predator = new Predator($.extend({},
+				var angle = Math.random()*2*Math.PI,
+					predator = new Predator($.extend({},
 					this.settings.predators.options, {
 							pos: new Vec2D(Math.random()*this.size.x,
 								Math.random()*this.size.y),
-							angle: new Vec2D(Math.random(),
-								Math.random()).doUnit()
+							angle: new Vec2D(Math.cos(angle),
+									Math.sin(angle))
 						}));
 				
 				this.entities.push(predator);
@@ -1675,10 +1737,10 @@
 			},
 			generate: function() {
 				this.constructor($.extend(true, this.settings, {
-					size: new Vec2D(Lumens.minSize+
-							Lumens.minSize*Math.random()*Lumens.sizeFactor,
-						Lumens.minSize+
-							Lumens.minSize*Math.random()*Lumens.sizeFactor)
+					size: new Vec2D(Lumens.minSize.x+
+							Lumens.minSize.x*Math.random()*Lumens.sizeRange.x,
+						Lumens.minSize.y+
+							Lumens.minSize.y*Math.random()*Lumens.sizeRange.y)
 				}));
 				
 				return this;
@@ -1689,8 +1751,8 @@
 				return((!Lumens.singleton)? Lumens.singleton : new Lumens());
 			},
 			singleton: null,*/
-			minSize: 720,
-			sizeFactor: 3,
+			minSize: new Vec2D(720, 720),
+			sizeRange: new Vec2D(3, 3),
 			states: new Enum('running', 'paused', 'fin')
 		});
 	// }
