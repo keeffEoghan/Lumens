@@ -1,0 +1,192 @@
+<!doctype html>  
+<html lang="en">
+	
+	<head>
+		<meta charset="utf-8">
+		
+		<title>Lumens Presentation</title>
+		
+		<link href='http://fonts.googleapis.com/css?family=Crimson+Text:regular,600,bold' rel='stylesheet' type='text/css'>
+		
+		<link rel="stylesheet" href="css/reset.css">
+		<link rel="stylesheet" href="css/main.css">
+	</head>
+	
+	<body>
+		
+		<!-- Any section element inside of this container is displayed as a slide -->
+		<div id="main">
+			
+			<section>
+				<h1 class="inverted">Lumens</h1>
+				<p>Eoghan O'Keeffe<br/>BSc Entertainment Systems<br/>08543453</p>
+				</script>
+			</section>
+			
+			<section>
+				<h2>Contents</h2>
+				<ul>
+					<li>Overview</li>
+					<li>Design and Implementation</li>
+					<li>Prototype</li>
+					<li>References</li>
+				</ul>
+			</section>
+			
+			<!-- Nested vertical slides -->
+			<section>
+				<section>
+					<h2>Overview</h2>
+					<img src="assets/images/IMG_1.jpg"/>
+				</section>
+				<section>
+					<h3>Description</h3>
+					<p>The light-emitting protagonist navigates a dark environment</p>
+					</p>Swarms of bioluminescent troglobites <small>(glowing 
+					cave-dwellers)</small> hunt out sources of light</p>
+					<p>The player and predators compete for survival</p>
+					<p>The player must outmanouevre and evade the swarm, 
+					while stalking and picking off individuals</p>
+				</section>
+				<section>
+					<h3>Look and Feel</h3>
+					<p>Small light making its way through a pitch-dark 
+					environment</p>
+					<p>Clues in the dark can both help and deceive</p>
+					<p>"Cell-like" bodies of various kinds - abstract, 
+					soft-bodied, translucent</p>
+					<p>The player should feel tentative and wary in the 
+					dark, and panicked and frantic when suddenly overwhelmed</p>
+				</section>
+				<section>
+					<h3>Features and Challenges</h3>
+					<p>Finely-balanced negative-feedback gameplay mechanic</p>
+					<p>Swarming and related emergent behaviours</p>
+					<p>Light simulation</p>
+					<p>Physics engine with collisions and soft and rigid bodies</p>
+					<p>Dynamic audio - and making it sound interesting and not awful</p>
+					<p>Procedural level-generation - play to infinity</p>
+					<p>Platform limitations and costly operations</p>
+					<p>Multiple platforms</p>
+				</section>
+				<section><img src="assets/images/IMG_3.jpg"/></section>
+				<section><img src="assets/images/IMG_4.jpg"/></section>
+				<section><img src="assets/images/IMG_5.jpg"/></section>
+				<section><img src="assets/images/IMG_6.jpg"/></section>
+				<section><img src="assets/images/IMG_7.jpg"/></section>
+				<section><img src="assets/images/IMG_8.jpg"/></section>
+			</section>
+			
+			<section>
+				<section>
+					<h2>Design and Implementation</h2>
+					<img src="assets/images/Diagram.jpg"/>
+				</section>
+				<section>
+					<h3>Architecture</h3>
+					<p>Modular, MVC architecture</p>
+					<p>Separation of environment-specific components</p>
+					<p>Some components still to be designed</p>
+				</section>
+				<section>
+					<h3>Tools</h3>
+					<p>Web technologies and WebGL, with jQuery, Modernizr, 
+					and maybe Three.js</p>
+					<p>Node.js for server-side work</p>
+					<p>For future platforms, XCode, Visual Studio, and 
+					associated tools - may also need a Macbook Pro...</p>
+					<p>Minimal use of exisiting libraries - developing 
+					almost everything from scratch</p>
+				</section>
+				<section>
+					<h3>Development</h3>
+					<p>Adaptive, iterative approach</p>
+					<p>Core iterations and estimated dates:</p>
+					<ol>
+						<li>Gameplay mechanisms and basic physics - Christmas</li>
+						<li>Basic light simulation - mid-late January</li>
+						<li>Advanced light simulation - mid February</li>
+						<li>Advanced physics - March</li>
+						<li>Further variety in gameplay and antagonists - late April</li>
+					</ol>
+				</section>
+				<section>
+					<h3>Development</h3>
+					<p>Further iterations and some optimistic dates:</p>
+					<ol>
+						<li>Dynamic audio - May 1<sup>st</sup></li>
+						<li>Stage generation and progression - May 2<sup>nd</sup></li>
+						<li>Menu system - May 3<sup>rd</sup></li>
+						<li>Scores - May 4<sup>th</sup></li>
+						<li>Tightening up and first platform launch - May 5<sup>th</sup></li>
+						<li>Revisions, changes and subsequent platform 
+						launches - end of May...?</li>
+					</ol>
+				</section>
+			</section>
+			
+			<section>
+				<section>
+					<h2>Prototype</h2>
+					<a href="C:\Users\Eoghan\Documents\Entertainment Systems\Year 4\Semester 7\Project I\Lumens - First Prototype\index.html" target="_blank">
+						<img src="assets/images/First Prototype.png"/>
+					</a>
+				</section>
+				<section>
+					<h3>Review</h3>
+					<p>The prototype suffers from poor physics implementation and lack of 
+					clear architecture - needs a solid vector-based physics 
+					engine, as opposed to polar coordinate system</p>
+					<p>Flocking behaviours demonstrate emergence, but are 
+					flawed - better tweaking system is needed to debug and 
+					balance them</p>
+					<p>Performance issues are noticeable - needs a 
+					space-partitioned data-structure to speed up
+					flocking, collisions, and ray-tracing</p>
+					<p>Limitations of the prototype have been reached, 
+					and it has been deprecated</p>
+				</section>
+				<section>
+					<h3>First Iteration</h3>
+					<p>Currently developing the next version</p>
+					<p>Grid and now Quad Tree space-partitioning systems have 
+					been developed</p>
+					<p>Better physics implemented (nod to Maths for Games)</p>
+					<p>Implementing the architecture as designed</p>
+					<p>DAT.GUI debugging panel installed</p>
+				</section>
+			</section>
+			
+			<section>
+				<section>
+					<h3>References</h3>
+					<ul>
+						<li>Millington, Ian, 2007, "Game Physics Engine Development"</li>
+						<li>Reynolds, Craig, 2001(online), "Boids", accessed 10.10.2011, URL: http://www.red3d.com/cwr/boids/</li>
+						<li>jQuery, 2011(online), accessed 28.11.2011, URL: http://jquery.com/ </li>
+						<li>Prototype, 2011(online), accessed 28.11.2011, URL: http://www.prototypejs.org/ </li>
+						<li>Modernizr, 2011(online), accessed 28.11.2011, URL: http://www.modernizr.com/ </li>
+						<li>HTML5 Boilerplate, 2011(online), accessed 28.11.2011, URL: http://html5boilerplate.com/ </li>
+					</ul>
+				</section>
+				<section>
+					<h3>References</h3>
+					<ul>
+						<li>Fabric Engine, 2011 (online), www.fabric-engine.com, URL: http://fabric-engine.com/</li>
+						<li>Cabello, Ricardo, 2011(online), accessed 28.11.2011, URL: http://mrdoob.com/122/Threejs</li>
+						<li>Node, 2011(online), accessed 28.11.2011, URL: http://nodejs.org/ </li>
+						<li>Cocos 2D, 2011(online), accessed 28.11.2011, URL: http://cocos2d.org/index.html, http://www.cocos2d-iphone.org/, http://cocos2d-javascript.org/about</li>
+						<li>Box 2D, 2011(online), accessed 28.11.2011, URL: http://box2d.org/about/ </li>
+					</ul>
+				</section>
+			</section>
+			
+			<section>
+				<h3 class="inverted">HTML5 slides by Hakim El Hattab - hakim.se</h3>
+			</section>
+			
+		</div>
+		
+		<script src="js/slideshow.js"></script>
+	</body>
+</html>
