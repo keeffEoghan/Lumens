@@ -857,6 +857,7 @@
 				
 				this.centerMass = (options.centerMass || new Particle());
 
+				// TODO: make positions relative to centerMass.pos?
 				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape
 				
 				/* Visual information goes in here
@@ -872,7 +873,7 @@
 			$.extend(Shape.prototype, {
 				update: function() { return this; },
 				resolve: function(dt) {
-					var last = this.centerMass.trail.wrap(-1).pos;
+					var last = this.centerMass.trail[0].pos;
 
 					if(last) {
 						var move = this.centerMass.pos.sub(last),
@@ -884,6 +885,8 @@
 							}
 						}
 					}
+					
+					this.updateBounds();
 
 					return this;
 				},
@@ -978,7 +981,7 @@
 						may go beyond the bounding radius */
 					if(this.points.length >= 2) {
 						var color = this.color.RGBAString(),
-							falloff = 0.7,
+							falloff = 0.99,
 							pos = this.points[0].pos, last = null, ctrlP = null,
 							l = ((this.closed)?
 								this.points.length+1 : this.points.length);
@@ -1523,19 +1526,19 @@
 						option to flip sides for lefties), or if u, d
 						move player and mouse/l, r aim (like a car) */
 					// left, a, j
-					case 37: case 65: case 74: ctrl.startMove(ctrl.moveKey.left);
+					case 37: case 65/*: case 74*/: ctrl.startMove(ctrl.moveKey.left);
 					break;
 					
 					// right, d, l
-					case 39: case 68: case 76: ctrl.startMove(ctrl.moveKey.right);
+					case 39: case 68/*: case 76*/: ctrl.startMove(ctrl.moveKey.right);
 					break;
 					
 					// up, w, i
-					case 38: case 87: case 73: ctrl.startMove(ctrl.moveKey.up);
+					case 38: case 87/*: case 73*/: ctrl.startMove(ctrl.moveKey.up);
 					break;
 					
 					// down, s, k
-					case 40: case 83: case 75: ctrl.startMove(ctrl.moveKey.down);
+					case 40: case 83/*: case 75*/: ctrl.startMove(ctrl.moveKey.down);
 					break;
 					
 					// space
@@ -1563,19 +1566,19 @@
 
 					switch(e.which) {
 					// left, a, j
-					case 37: case 65: case 74: ctrl.endMove(ctrl.moveKey.left);
+					case 37: case 65/*: case 74*/: ctrl.endMove(ctrl.moveKey.left);
 					break;
 					
 					// right, d, l
-					case 39: case 68: case 76: ctrl.endMove(ctrl.moveKey.right);
+					case 39: case 68/*: case 76*/: ctrl.endMove(ctrl.moveKey.right);
 					break;
 					
 					// up, w, i
-					case 38: case 87: case 73: ctrl.endMove(ctrl.moveKey.up);
+					case 38: case 87/*: case 73*/: ctrl.endMove(ctrl.moveKey.up);
 					break;
 					
 					// down, s, k
-					case 40: case 83: case 75: ctrl.endMove(ctrl.moveKey.down);
+					case 40: case 83/*: case 75*/: ctrl.endMove(ctrl.moveKey.down);
 					break;
 					
 					// space
@@ -1770,7 +1773,7 @@
 				player: { mass: 10 },
 				// for testing - don't want to set it this way permanently
 				predators: {
-					num: 10,
+					num: 0,
 					options: {
 						swarmInfluence: {
 							swarm: null, neighbourRad: 60,
