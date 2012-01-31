@@ -146,7 +146,7 @@
 			containingCircle: function() {
 				return new Circle(new Vec2D(this.pos.x+this.size.x/2,
 						this.pos.y+this.size.y/2),
-					Math.max(this.size.x, this.size.y));
+					Math.max(this.size.x/2, this.size.y/2));
 			},
 			copy: function(other) {
 				if(other) {
@@ -194,10 +194,10 @@
 				else { return this.radSq; }
 			},
 			containingAARect: function() {
-				return new AARect(new Vec2D(this.pos.x-this.rad,
-						this.pos.y-this.rad),
-					new Vec2D(this.pos.x+this.rad,
-						this.pos.y+this.rad));
+				var diam = 2*this.rad;
+				return new AARect(
+					new Vec2D(this.pos.x-this.rad, this.pos.y-this.rad),
+					new Vec2D(diam, diam));
 			},
 			copy: function(other) {
 				if(other) {
@@ -429,7 +429,7 @@
 			this.r = (r || 0);
 			this.g = (g || 0);
 			this.b = (b || 0);
-			this.a = (a || 0);
+			this.a = (a || 1);
 		}
 		$.extend(Color.prototype, {
 			fromHSLA: function(h, s, l, a) {
@@ -857,8 +857,7 @@
 				
 				this.centerMass = (options.centerMass || new Particle());
 
-				// TODO: make positions relative to centerMass.pos?
-				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape
+				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape - positions relative to centerMass.pos
 				
 				/* Visual information goes in here
 					TODO: patterns, images, etc */
@@ -873,6 +872,7 @@
 			$.extend(Shape.prototype, {
 				update: function() { return this; },
 				resolve: function(dt) {
+					/* For positions not relative to centerMass.pos *//*
 					var last = this.centerMass.trail[0].pos;
 
 					if(last) {
@@ -884,7 +884,7 @@
 								this.points[p].resolveTrail(dt).pos.doAdd(move);
 							}
 						}
-					}
+					}*/
 					
 					this.updateBounds();
 
@@ -898,13 +898,13 @@
 					
 					if(l) {
 						for(var i = 0; i < l; ++i) {
-							this.boundRad.pos.doAdd(this.points[i].pos);
+							this.boundRad.pos.doAdd(this.globPos(this.points[i].pos));
 						}
 						this.boundRad.pos.doScale(1/l);
 						
 						for(var j = 0; j < l; ++j) {
 							var radSq = this.boundRad.pos
-								.distSq(this.points[j].pos);
+								.distSq(this.globPos(this.points[j].pos));
 							
 							if(radSq > this.boundRad.radSq) {
 								this.boundRad.radSq = radSq;
@@ -918,7 +918,7 @@
 				},
 				render: function(context) {
 					var color = this.color.RGBAString(),
-						pos = this.points[0].pos,
+						pos = this.globPos(this.points[0].pos),
 						l = ((this.closed)?
 							this.points.length+1 : this.points.length);
 
@@ -928,7 +928,7 @@
 					context.moveTo(pos.x, pos.y);
 
 					for(var p = 1; p < l; ++p) {
-						pos = this.points.wrap(p).pos;
+						pos = this.globPos(this.points.wrap(p).pos);
 						context.lineTo(pos.x, pos.y);
 					}
 
@@ -936,7 +936,9 @@
 					context.restore();
 
 					return this;
-				}
+				},
+				relPos: function(globPos) { return globPos.sub(this.centerMass.pos); },
+				globPos: function(relPos) { return this.centerMass.pos.add(relPos); }
 			});
 
 			
@@ -982,7 +984,8 @@
 					if(this.points.length >= 2) {
 						var color = this.color.RGBAString(),
 							falloff = 0.99,
-							pos = this.points[0].pos, last = null, ctrlP = null,
+							pos = this.globPos(this.points[0].pos),
+							last = null, ctrlP = null,
 							l = ((this.closed)?
 								this.points.length+1 : this.points.length);
 
@@ -993,7 +996,7 @@
 
 						for(var p = 1; p < l; ++p) {
 							last = pos;
-							pos = this.points.wrap(p).pos;
+							pos = this.globPos(this.points.wrap(p).pos);
 							ctrlP = last.add(pos.sub(last).doScale(falloff));
 							context.quadraticCurveTo(ctrlP.x, ctrlP.y,
 								pos.x, pos.y);
@@ -1023,10 +1026,8 @@
 								restLength: point.pos.dist(other.pos) });
 						}
 
-						this.ties.push({ pointFrom: point, posFrom: point.pos,
-							pointTo: this.centerMass, posTo: this.centerMass.pos,
-							factor: springFactor,
-							restLength: point.pos.dist(this.centerMass.pos) });
+						this.ties.push({ posFrom: point.pos, posTo: new Vec2D(),
+							factor: springFactor, restLength: point.pos.mag() });
 					}
 
 					return this.updateBounds();
@@ -1101,8 +1102,7 @@
 			/* TODO: change to BodyShape */
 			var points = [], firefly = this;
 			Circle.generateVecs(10, 20, function(pos) {
-				points.push(new Particle({ pos: firefly.pos.add(pos),
-					invMass: firefly.invMass }));
+				points.push(new Particle({ pos: pos, invMass: firefly.invMass }));
 			});
 
 			this.shape = (new Shape({ centerMass: this, points: points,
@@ -1173,8 +1173,7 @@
 			/* TODO: change to BodyShape */
 			var points = [], predator = this;
 			Circle.generateVecs(8, 10, function(pos) {
-				points.push(new Particle({ pos: predator.pos.add(pos),
-					invMass: predator.invMass }));
+				points.push(new Particle({ pos: pos, invMass: predator.invMass }));
 			});
 
 			this.shape = (new Shape({ centerMass: this, points: points,
@@ -1254,7 +1253,7 @@
 				while(num > lumens.swarm.length) { lumens.addPredator(); }
 			});
 
-			var swarmFolder = predatorFolder.addFolder("Swarm");
+			var AIFolder = predatorFolder.addFolder("AI");
 
 			function setWeight(weight, influence) {
 				predSett.options.swarmInfluence.weight[influence] = weight;
@@ -1264,17 +1263,26 @@
 				}
 			}
 
-			swarmFolder.add(predSett.options.swarmInfluence.weight, "separation",
+			AIFolder.add(predSett.options.swarmInfluence.weight, "separation",
 			0, 100).step(0.05).listen().onChange(function(weight) {
 				setWeight(weight, "separation");
 			});
-			swarmFolder.add(predSett.options.swarmInfluence.weight, "cohesion",
+			AIFolder.add(predSett.options.swarmInfluence.weight, "cohesion",
 			0, 100).step(0.05).listen().onChange(function(weight) {
 				setWeight(weight, "cohesion");
 			});
-			swarmFolder.add(predSett.options.swarmInfluence.weight, "alignment",
+			AIFolder.add(predSett.options.swarmInfluence.weight, "alignment",
 			0, 100).step(0.05).listen().onChange(function(weight) {
 				setWeight(weight, "alignment");
+			});
+
+			AIFolder.add(predSett.options.wanderInfluence, "weight", 0, 100)
+			.step(0.05).listen().onChange(function(weight) {
+				predSett.options.wanderInfluence.weight = weight;
+
+				for(var p = 0; p < lumens.swarm.length; ++p) {
+					lumens.swarm[p].wanderInfluence.weight = weight;
+				}
 			});
 
 			for(var setting in lumens.viewport.settings) {
@@ -1316,6 +1324,7 @@
 			// Setup size and shapeTree
 			this.resolve();
 			
+			this.environment = (options.environment || null);
 			this.shapes = (options.shapes || []);
 			this.lights = (options.lights || []);
 			this.glows = (options.glows || []);
@@ -1388,6 +1397,8 @@
 					if(this.settings.trails) {}
 				}
 
+				if(this.environment) { this.environment.render(this.context); }
+
 				this.context.restore();
 				this.clear();
 
@@ -1404,7 +1415,13 @@
 
 				return this;
 			},
-			update: function() { return this; },
+			update: function() {
+				this.springInfluence.posFrom =
+					this.pos.add(this.minRect.size.scale(0.5));
+				//this.force.doAdd(Influence.spring(this.springInfluence));
+
+				return this;
+			},
 			resolve: function(dt) {
 				Particle.prototype.resolve.call(this, dt);
 
@@ -1423,21 +1440,15 @@
 				}
 
 				var size = new Vec2D(this.canvas.width, this.canvas.height),
-					margin = size.sub(this.minRect.size).doScale(0.5),
-					offset = this.pos.sub(margin);
+					margin = size.sub(this.minRect.size).doScale(0.5);
 				
-				this.boundRect.pos.copy(offset);
-				this.boundRect.size.copy(this.minRect.size.add(margin));
+				this.boundRect.copy(new AARect(this.pos.sub(margin), size));
 
 				/* Position of minRect is centered in the canvas - have to think
 					carefully about this, the reverse of the direction you'd expect */
-				this.context.translate(-offset.x, -offset.y);
+				this.context.translate(-this.boundRect.pos.x, -this.boundRect.pos.y);
 
 				this.shapeTree = new QuadTree(this.boundRect.copy(), 8, 10);
-				
-				this.springInfluence.posFrom =
-					this.pos.add(this.minRect.size.scale(0.5));
-				//this.force.doAdd(Influence.spring(this.springInfluence));
 
 				return this;
 			},
@@ -1521,10 +1532,6 @@
 					var ctrl = e.data.ctrl;
 
 					switch(e.which) {
-					/* TODO: decide whether l, u, r, d moves player and
-						mouse/other keys aim (like twin-stick, but need
-						option to flip sides for lefties), or if u, d
-						move player and mouse/l, r aim (like a car) */
 					// left, a, j
 					case 37: case 65/*: case 74*/: ctrl.startMove(ctrl.moveKey.left);
 					break;
@@ -1767,7 +1774,7 @@
 			this.settings = $.extend(true, {
 				size: Lumens.minSize,
 				viewport: {
-					mass: 20, size: Lumens.minSize,
+					mass: 20, size: Lumens.minSize, environment: this,
 					springInfluence: { factor: 0.5, restLength: 0 }
 				},
 				player: { mass: 10 },
@@ -1778,18 +1785,20 @@
 						swarmInfluence: {
 							swarm: null, neighbourRad: 60,
 							weight: { separation: 0.25, cohesion: 0.25, alignment: 0.25 }
-						}
+						},
+						wanderInfluence: { range: 10, minSpeed: 20, weight: 0.25 }
 					}
 				}
 			}, options);
 
-			this.size = this.settings.size;
+			this.boundRect = new AARect(null, this.settings.size);
+			this.color = (options.color || new Color());
 			
 			this.entities = [];
 			this.swarm = [];
 			
-			this.entityTree = new QuadTree(new AARect(null, this.size.copy()), 8, 10);
-			this.swarmTree = new QuadTree(new AARect(null, this.size.copy()), 8, 10);
+			this.entityTree = new QuadTree(this.boundRect.copy(), 8, 10);
+			this.swarmTree = new QuadTree(this.boundRect.copy(), 8, 10);
 
 			this.settings.predators.options.swarmInfluence.swarm = this.swarmTree;
 			
@@ -1801,8 +1810,7 @@
 			this.entities.push(this.player);
 
 			this.settings.viewport.springInfluence.posTo = this.player.pos;
-				
-			// TODO: one-way spring viewport->player
+			
 			this.viewport = new Viewport(this.settings.viewport);
 			this.controller = Controller.make(this);
 			//this.collider = new Collider();
@@ -1847,8 +1855,15 @@
 					
 					/* Resolve everything */
 					for(var r = 0; r < this.entities.length; ++r) {
-						var entity = this.entities[r].resolve(dt),
-							treeItem = entity.shape.boundRad.containingAARect();
+						var entity = this.entities[r].resolve(dt);
+
+						if(!this.boundRect.contains(entity.shape.boundRad
+							.containingAARect())) {
+							// TODO: proper collisions
+							this.clampToRange(entity);
+						}
+
+						var treeItem = entity.shape.boundRad.containingAARect();
 						
 						treeItem.item = entity;
 						
@@ -1878,15 +1893,15 @@
 				/* Clear and resize */
 				this.viewport.update();
 				this.viewport.resolve(dt);
-
-				this.render();
+				this.setupViewport();
+				this.viewport.render();
 
 				var lumens = this;
 				requestAnimationFrame(function() { lumens.step(); });
 
 				return this;
 			},
-			render: function() {
+			setupViewport: function() {
 				for(var r = 0; r < this.entities.length; ++r) {
 					var entity = this.entities[r],
 						treeItem = entity.shape.boundRad.containingAARect();
@@ -1898,12 +1913,23 @@
 						this.viewport.shapes.push(entity.shape);
 						this.viewport.shapeTree.add(treeItem);
 					}
-
-					if(entity.light) { this.viewport.lights.push(entity.light); }
-					if(entity.glow) { this.viewport.glows.push(entity.glow); }
+					if(entity.light && entity.light.containingAARect()
+						.intersects(this.viewport.boundRect)) {
+						this.viewport.lights.push(entity.light);
+					}
+					if(entity.glow && entity.glow.containingAARect()
+						.intersects(this.viewport.boundRect)) {
+						this.viewport.glows.push(entity.glow);
+					}
 				}
 
-				this.viewport.render();
+				return this;
+			},
+			render: function(context) {
+				context.save();
+				context.fillStyle = this.color.RGBAString();
+				context.fillRect(0, 0, this.boundRect.size.x, this.boundRect.size.y);
+				context.restore();
 			},
 			pause: function(paused, lumens) {
 				lumens = (lumens || this);
@@ -1918,8 +1944,8 @@
 				var angle = Math.random()*2*Math.PI,
 					predator = new Predator($.extend({},
 					this.settings.predators.options, {
-							pos: new Vec2D(Math.random()*this.size.x,
-								Math.random()*this.size.y),
+							pos: new Vec2D(Math.random()*this.boundRect.size.x,
+								Math.random()*this.boundRect.size.y),
 							angle: new Vec2D(Math.cos(angle),
 									Math.sin(angle))
 						}));
@@ -1944,6 +1970,16 @@
 							Lumens.minSize.y*Math.random()*Lumens.sizeRange.y)
 				}));
 				
+				return this;
+			},
+			// Test - TODO: remove this
+			clampToRange: function(entity) {
+				if(entity.pos.x < 0) { entity.pos.x = this.boundRect.size.x; }
+				else if(entity.pos.x > this.boundRect.size.x) { entity.pos.x = 0; }
+				
+				if(entity.pos.y < 0) { entity.pos.y = this.boundRect.size.y; }
+				else if(entity.pos.y > this.boundRect.size.y) { entity.pos.y = 0; }
+
 				return this;
 			}
 		});
