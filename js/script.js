@@ -582,15 +582,15 @@
 			this.damping = (($.isNumeric(options.damping))?
 				options.damping : 0.995);
 			
-			/* Previous positions - use phosphenes instead later */
+			/* Previous few positions */
 			this.trail = [];
-			this.trailTime = (($.isNumeric(options.trailTime))?
-				options.trailTime : 600);
+			this.trailLimit = (($.isNumeric(options.trailLimit))?
+				options.trailLimit : 5);
 		}
 		$.extend(Particle.prototype, {
 			resolve: function(dt) {
 				if(dt) {
-					this.resolveTrail(dt);
+					this.updateTrail();
 					
 					/* Integrate */
 					var resAcc = this.acc.add(this.force.scale(this.invMass))
@@ -613,17 +613,10 @@
 				}
 				else { return 1/this.invMass; }
 			},
-			resolveTrail: function(dt) {
-				/* Add the current position to the trail */
-				this.trail.unshift({ pos: this.pos.copy(),
-					time: this.trailTime });
-				
-				/*for(var t = 0; t < this.trail.length; ++t) {
-					if((this.trail[t].time -= dt) <= 0) {
-						this.trail.splice(t, 1);
-						--t;
-					}
-				}*/
+			updateTrail: function() {
+				if(this.trail.unshift(this.pos.copy()) > this.trailLimit) {
+					this.trail.splice(this.trailLimit);
+				}
 
 				return this;
 			}
@@ -705,7 +698,7 @@
 
 
 		var Influence = {
-			// Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target)
+			// { Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target) }
 			spring: function(options) {
 				var force = options.posTo.sub(options.posFrom),
 					length = force.mag();
@@ -714,7 +707,29 @@
 						Math.abs(length-options.restLength)/length)
 					:	force);
 			},
-			/* From "How To Implement a Pressure Soft Body
+			// { Particle pointFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target), Number damping }
+			dampedSpring: function(options) {
+				var from = options.pointFrom.pos;
+
+				options.posFrom = from;
+
+				var spring = this.spring(options), damp;
+
+				if(from.equals(options.posTo)) {
+					damp = options.pointFrom.vel.scale(-1);
+				}
+				else {
+					damp = from.sub(options.posTo).doUnit();
+					damp.doScale(($.isNumeric(options.damping)?
+							options.damping : 1)*
+						Math.max(-1*options.pointFrom.vel.dot(damp), 0));
+				}
+
+				delete options.posFrom;
+
+				return damp.doAdd(spring);
+			},
+			/* Adapted from "How To Implement a Pressure Soft Body
 				Model", by Maciej Matyka, using Gauss' theorem to obtain volume,
 				and pressure from there - maq@panoramix.ift.uni.wroc.pl */
 			/* A bit different to the others, in that it doesn't return a force to
@@ -726,10 +741,14 @@
 				for(var p = 0; p < points.length; ++p) {
 					var from = points[p], to = points.wrap(p-1),
 						vec = from.pos.sub(to.pos),
-						mag = vec.mag(), normal = vec.perp().doScale(1/mag);
-					
-					volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
-					derived.push({ from: from, to: to, mag: mag, normal: normal});
+						mag = vec.mag();
+
+					if(mag) {
+						var normal = vec.perp().doScale(-1/mag);
+						
+						volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
+						derived.push({ from: from, to: to, mag: mag, normal: normal});
+					}
 				}
 
 				var invVolume = 1/volume;
@@ -752,6 +771,8 @@
 				return options.vel.add(new Vec2D(options.range*Math.cos(angle),
 					options.range*Math.sin(angle)));
 			},
+			/* Adapted from Craig Reynolds' famous Boids - http://www.red3d.com/cwr/boids/
+				and Harry Brundage's implementation, among others - http://harry.me/2011/02/17/neat-algorithms---flocking */
 			// QuadTree swarm, Particle member, Number neighbourRad, { Number separation, Number alignment, Number cohesion } weight
 			swarm: function(options) {
 				var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
@@ -773,10 +794,9 @@
 						if(dist < options.neighbourRad) {
 							++num;
 
-							if(dist) {
-								totalSeparation.doAdd(vector.doUnit()
-									.doScale(1/dist));
-							}
+							var distFactor = options.neighbourRad/dist;
+							totalSeparation.doAdd(vector.doUnit()
+								.doScale(distFactor*distFactor));
 							
 							totalCohesion.doAdd(neighbour.pos);
 							
@@ -855,9 +875,9 @@
 			function Shape(options) {
 				if(!options) { options = {}; }
 				
-				this.centerMass = (options.centerMass || new Particle());
+				this.centerPoint = (options.centerPoint || new Particle());
 
-				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape - positions relative to centerMass.pos
+				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape - positions relative to centerPoint.pos
 				
 				/* Visual information goes in here
 					TODO: patterns, images, etc */
@@ -872,17 +892,14 @@
 			$.extend(Shape.prototype, {
 				update: function() { return this; },
 				resolve: function(dt) {
-					/* For positions not relative to centerMass.pos *//*
-					var last = this.centerMass.trail[0].pos;
+					/* For positions not relative to centerPoint.pos *//*
+					var last = this.centerPoint.trail[0];
 
-					if(last) {
-						var move = this.centerMass.pos.sub(last),
-							distSq = move.magSq();
+					if(last && !this.centerPoint.pos.equals(last)) {
+						var move = this.centerPoint.pos.sub(last);
 
-						if(distSq) {
-							for(var p = 0; p < this.points.length; ++p) {
-								this.points[p].resolveTrail(dt).pos.doAdd(move);
-							}
+						for(var p = 0; p < this.points.length; ++p) {
+							this.points[p].updateTrail(dt).pos.doAdd(move);
 						}
 					}*/
 					
@@ -937,8 +954,8 @@
 
 					return this;
 				},
-				relPos: function(globPos) { return globPos.sub(this.centerMass.pos); },
-				globPos: function(relPos) { return this.centerMass.pos.add(relPos); }
+				relPos: function(globPos) { return globPos.sub(this.centerPoint.pos); },
+				globPos: function(relPos) { return this.centerPoint.pos.add(relPos); }
 			});
 
 			
@@ -948,15 +965,16 @@
 				/* Call super constructor */
 				Shape.call(this, options);
 
-				/* [{ Particle pointFrom, Particle pointTo, Number factor, Number restLength }] */
+				/* [{ Particle pointFrom, Vec2D posFrom, Particle pointTo, Vec2D posTo, Number factor, Number restLength }] */
 				this.edges = (($.isArray(options.edges))? options.edges : []);	// The edge of the shape - may be repeated
-				this.ties = (($.isArray(options.ties))? options.ties : []);	// Other ties, such as to cenetMass - may be repeated, usually one-to-one between each point and centerMass
+				this.ties = (($.isArray(options.ties))? options.ties : []);	// Other ties, such as to cenetMass - may be repeated, usually one-to-one between each point and centerPoint
+
+				this.pressureFactor = (options.pressureFactor || 0.005);
 			}
 			$.extend(SoftShape.prototype, Shape.prototype, {
 				update: function() {
 					for(var e = 0; e < this.edges.length; ++e) {
 						var edge = this.edges[e];
-
 						edge.pointFrom.force.doAdd(Influence.spring(edge));
 					}
 
@@ -965,13 +983,30 @@
 						tie.pointFrom.force.doAdd(Influence.spring(tie));
 					}
 
-					Influence.applyPressure(this.points);
+					Influence.applyPressure(this.points, this.pressureFactor);
 
 					return this;
 				},
 				resolve: function(dt) {
-					for(var p = 0; p < this.points.length; ++p) {
+					/*for(var p = 0; p < this.points.length; ++p) {
 						this.points[p].resolve(dt);
+					}*/
+					// Offset from relative center
+					var last = this.centerPoint.trail[0],
+						resolve;
+
+					if(last && !this.centerPoint.pos.equals(last)) {
+						var moveRel = this.centerPoint.pos.sub(last);
+
+						resolve = function(point) {
+							point.pos.doSub(moveRel);
+							point.resolve(dt);
+						};
+					}
+					else { resolve = function(point) { point.resolve(dt); }; }
+
+					for(var p = 0; p < this.points.length; ++p) {
+						resolve(this.points[p]);
 					}
 					
 					this.updateBounds();
@@ -1008,13 +1043,18 @@
 
 					return this;
 				},
-				setupSurface: function(points, springFactor) {
-					this.edges.length = this.ties.length = 0;
+				setupSurface: function(points, edgeSpringFactor, tieSpringFactor) {
+					var relCenter = new Vec2D();
 
+					this.edges.length = this.ties.length = 0;
 					this.points = points.slice(0);
 
 					for(var p = 0; p < points.length; ++p) {
 						var point = points[p];
+
+						this.ties.push({ pointFrom: point, posFrom: point.pos,
+							posTo: relCenter, factor: edgeSpringFactor,
+							restLength: point.pos.mag() });
 						
 						for(var loop = 0, offset = -1; loop < 2;
 							++loop, offset *= -1) {
@@ -1022,12 +1062,9 @@
 							
 							this.edges.push({ pointFrom: point, posFrom: point.pos,
 								pointTo: other, posTo: other.pos,
-								factor: springFactor,
+								factor: tieSpringFactor,
 								restLength: point.pos.dist(other.pos) });
 						}
-
-						this.ties.push({ posFrom: point.pos, posTo: new Vec2D(),
-							factor: springFactor, restLength: point.pos.mag() });
 					}
 
 					return this.updateBounds();
@@ -1040,7 +1077,7 @@
 				if(!options) { options = {}; }
 				
 				/* Call super constructor
-					Note: this expects a body as centerMass, not a particle */
+					Note: this expects a body as centerPoint, not a particle */
 				Shape.call(this, options);
 			}
 			$.extend(BodyShape.prototype, Shape.prototype);
@@ -1069,6 +1106,9 @@
 			this.state = Entity.states.spawn;
 
 			this.shape = (options.shape || null);
+
+			this.maxForce = (options.maxForce || 0.03);
+			this.maxTorque = (options.maxTorque || 1.0);
 		}
 		$.extend(Entity.prototype, {
 			update: function() {
@@ -1090,9 +1130,6 @@
 
 		function Firefly(options) {
 			if(!options) { options = {}; }
-
-			this.maxForce = (options.maxForce || 0.03);
-			this.maxTorque = (options.maxTorque || 1.0);
 			
 			/* Particle entity template */
 			/* TODO: change to Body */
@@ -1101,16 +1138,19 @@
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
 			var points = [], firefly = this;
-			Circle.generateVecs(10, 20, function(pos) {
+			Circle.generateVecs(10, 10, function(pos) {
 				points.push(new Particle({ pos: pos, invMass: firefly.invMass }));
 			});
 
-			this.shape = (new Shape({ centerMass: this, points: points,
-					color: Color.fromRGBA(200, 200, 200, 0.7) }));
-				//.setupSurface(points, 0.0001);
+			/*this.shape = (new SoftShape({ centerPoint: this,
+					color: Color.fromRGBA(200, 200, 200, 0.7) })
+				.setupSurface(points, 0.0001, 0.001));*/
+
+			this.shape = new Shape({ centerPoint: this, points: points,
+					color: Color.fromRGBA(200, 200, 200, 0.7) });
 			
-			this.light = new Light({ rad: 50, pos: this.pos,
-				color: Color.fromRGBA(255, 255, 255, 0.75) });
+			this.light = new Light($.extend(true, { rad: 50, pos: this.pos,
+				color: Color.fromRGBA(255, 255, 255, 0.75) }, options.light));
 			
 			this.inputForce = null;
 		}
@@ -1161,22 +1201,22 @@
 			/* TODO: change to Body */
 			Entity.call(this, Particle, options);
 
-			this.wanderInfluence = $.extend({ range: 10, minSpeed: 20,
-				weight: 0.25 }, options.wanderInfluence);
+			this.wanderInfluence = $.extend({ range: 0.6, minSpeed: 1,
+				weight: 1 }, options.wanderInfluence);
 			
-			this.swarmInfluence = $.extend({
-				swarm: null, member: this, neighbourRad: 60,
-				weight: { separation: 0.25, cohesion: 0.25, alignment: 0.25 }
-			}, options.swarmInfluence);
+			this.swarmInfluence = $.extend({ swarm: null, member: this,
+				neighbourRad: 90, weight: null }, options.swarmInfluence);
+			this.swarmInfluence.weight = $.extend({ separation: 0.01,
+				cohesion: 0.0001, alignment: 0.4 });
 			
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
 			var points = [], predator = this;
-			Circle.generateVecs(8, 10, function(pos) {
+			Circle.generateVecs(8, 7, function(pos) {
 				points.push(new Particle({ pos: pos, invMass: predator.invMass }));
 			});
 
-			this.shape = (new Shape({ centerMass: this, points: points,
+			this.shape = (new Shape({ centerPoint: this, points: points,
 					color: Color.fromRGBA(250, 200, 200, 0.7) }));
 				//.setupSurface(points, 0.008);
 			
@@ -1188,8 +1228,8 @@
 				case Predator.states.passive: case Predator.states.aggressive:
 				case Predator.states.normal:
 					if(this.vel.magSq()) {
-						this.wanderInfluence.vel = this.vel.unit()
-							.doScale(this.wanderInfluence.minSpeed);
+						this.wanderInfluence.vel.copy(this.vel.unit()
+							.doScale(this.wanderInfluence.minSpeed));
 					}
 					else {
 						var angle = Math.random()*2*Math.PI;
@@ -1201,6 +1241,10 @@
 					this.force.doAdd(Influence.swarm(this.swarmInfluence))
 						.doAdd(Influence.wander(this.wanderInfluence)
 							.doScale(this.wanderInfluence.weight));
+
+					var magSq = this.force.magSq(),
+						maxMagSq = this.maxForce*this.maxForce;
+					if(magSq > maxMagSq) { this.force.doUnit().doScale(maxMagSq); }
 				break;
 				
 				default:
@@ -1215,11 +1259,15 @@
 	// }
 	
 	// DEBUG {
-		
 		/* GUI for testing */
 		function addGUI(lumens) {
-			var gui = new dat.GUI(),
-				playerFolder = gui.addFolder("Player"),
+			var gui = new dat.GUI({ load: lumens.settings, preset: 'Lumens' });
+
+			gui.remember('Lumens');
+
+			gui.add(lumens, "frameRate", 0, 0).listen();
+
+			var playerFolder = gui.addFolder("Player"),
 				predatorFolder = gui.addFolder("Predators"),
 				viewportFolder = gui.addFolder("Viewport"),
 
@@ -1256,38 +1304,58 @@
 			var AIFolder = predatorFolder.addFolder("AI");
 
 			function setWeight(weight, influence) {
-				predSett.options.swarmInfluence.weight[influence] = weight;
-
 				for(var p = 0; p < lumens.swarm.length; ++p) {
 					lumens.swarm[p].swarmInfluence.weight[influence] = weight;
 				}
 			}
 
 			AIFolder.add(predSett.options.swarmInfluence.weight, "separation",
-			0, 100).step(0.05).listen().onChange(function(weight) {
+			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "separation");
 			});
 			AIFolder.add(predSett.options.swarmInfluence.weight, "cohesion",
-			0, 100).step(0.05).listen().onChange(function(weight) {
+			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "cohesion");
 			});
 			AIFolder.add(predSett.options.swarmInfluence.weight, "alignment",
-			0, 100).step(0.05).listen().onChange(function(weight) {
+			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "alignment");
 			});
 
-			AIFolder.add(predSett.options.wanderInfluence, "weight", 0, 100)
-			.step(0.05).listen().onChange(function(weight) {
+			var weight = { wander: predSett.options.wanderInfluence.weight };
+
+			AIFolder.add(weight, "wander", 0, 1).step(0.001)
+			.onChange(function(weight) {
 				predSett.options.wanderInfluence.weight = weight;
 
 				for(var p = 0; p < lumens.swarm.length; ++p) {
 					lumens.swarm[p].wanderInfluence.weight = weight;
 				}
 			});
+			
+			AIFolder.add(predSett.options.swarmInfluence, "neighbourRad", 0, 1000)
+			.step(0.05).listen().onChange(function(rad) {
+				for(var p = 0; p < lumens.swarm.length; ++p) {
+					lumens.swarm[p].swarmInfluence.neighbourRad = rad;
+				}
+			});
+			
+			AIFolder.add(predSett.options, "maxForce", 0, 1)
+			.step(0.005).listen().onChange(function(maxForce) {
+				for(var p = 0; p < lumens.swarm.length; ++p) {
+					lumens.swarm[p].maxForce = maxForce;
+				}
+			});
 
 			for(var setting in lumens.viewport.settings) {
 				viewportFolder.add(lumens.viewport.settings, setting);
 			}
+
+			viewportFolder.add(lumens.viewport, "zoomFactor", 0.1, 10).step(0.01)
+				.listen();
+			viewportFolder.add(lumens.viewport.springInfluence, "damping", 0, 1);
+			viewportFolder.add(lumens.viewport.springInfluence, "factor", 0, 1);
+			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1);
 
 			//gui.close();
 
@@ -1311,15 +1379,16 @@
 				this when the respective environment dimension is larger */
 			this.boundRect = new AARect();
 
+			this.zoomFactor = (options.zoomFactor || 1);
+
 			this.shapeTree = null;	// QuadTree, only concerned with the shapes
 			
 			this.$canvas = $(options.canvas);
 			this.canvas = this.$canvas[0];
 			this.context = this.canvas.getContext('2d');
 
-			this.springInfluence = $.extend({
-				posFrom: null, posTo: null, factor: 0.5, restLength: 0
-			}, options.springInfluence);
+			this.springInfluence = $.extend({ pointFrom: null, posTo: null,
+				factor: 0.004, restLength: 0, damping: 0.7 }, options.springInfluence);
 
 			// Setup size and shapeTree
 			this.resolve();
@@ -1329,11 +1398,11 @@
 			this.lights = (options.lights || []);
 			this.glows = (options.glows || []);
 
-			this.settings = $.extend(true, {
+			this.settings = $.extend({
 				bounds: false,
 				trails: false,
 				health: false,
-				state: false
+				states: false
 			}, options.settings);
 
 			this.debugColor = (options.debugColor || new Color(0, 1, 0.3, 0.7));
@@ -1376,16 +1445,6 @@
 
 				for(var lB = 0; lB < litBodies.length; ++lB) {
 					var body = litBodies[lB].render(this.context);
-
-					if(this.settings.bounds) {
-						this.context.save();
-						this.context.strokeStyle = this.debugColor.RGBAString();
-						body.boundRad.trace(this.context);
-						this.context.stroke();
-						this.context.restore();
-					}
-					if(this.settings.health) {}
-					if(this.settings.state) {}
 				}
 
 				/* Glowing cores - drawn everywhere */
@@ -1393,11 +1452,11 @@
 
 				for(var g = 0; g < this.glows.length; ++g) {
 					var glow = this.glows[g].render(this.context);
-
-					if(this.settings.trails) {}
 				}
 
 				if(this.environment) { this.environment.render(this.context); }
+
+				this.renderDebug();
 
 				this.context.restore();
 				this.clear();
@@ -1416,9 +1475,11 @@
 				return this;
 			},
 			update: function() {
-				this.springInfluence.posFrom =
-					this.pos.add(this.minRect.size.scale(0.5));
-				//this.force.doAdd(Influence.spring(this.springInfluence));
+				var from = new Particle(this);
+				from.pos = this.pos.add(this.minRect.size.scale(0.5));
+
+				this.springInfluence.pointFrom = from;
+				this.force.doAdd(Influence.dampedSpring(this.springInfluence));
 
 				return this;
 			},
@@ -1431,12 +1492,12 @@
 					aspect = width/height;
 				
 				if(aspect >= 1) {
-					this.canvas.height = this.minRect.size.x;
-					this.canvas.width = this.minRect.size.y*aspect;
+					this.canvas.height = this.minRect.size.x*this.zoomFactor;
+					this.canvas.width = this.minRect.size.y*aspect*this.zoomFactor;
 				}
 				else {
-					this.canvas.width = this.minRect.size.x;
-					this.canvas.height = this.minRect.size.y/aspect;
+					this.canvas.width = this.minRect.size.x*this.zoomFactor;
+					this.canvas.height = this.minRect.size.y/aspect*this.zoomFactor;
 				}
 
 				var size = new Vec2D(this.canvas.width, this.canvas.height),
@@ -1457,12 +1518,52 @@
 				if(this.shapeTree) { this.shapeTree.clear(); }
 				
 				return this;
+			},
+			renderDebug: function() {
+				var renderFuncs = [];
+
+				if(this.settings.bounds) { renderFuncs.push(this.renderBoundRad); }
+				if(this.settings.trails) { renderFuncs.push(this.renderTrails); }
+
+				if(renderFuncs.length) {
+					this.context.globalCompositeOperation = 'source-over';
+					this.context.strokeStyle = this.debugColor.RGBAString();
+
+					for(var s = 0; s < this.shapes.length; ++s) {
+						for(var f = 0; f < renderFuncs.length; ++f) {
+							renderFuncs[f].call(this, this.shapes[s]);
+						}
+					}
+				}
+			},
+			renderBoundRad: function(shape) {
+				this.context.save();
+				shape.boundRad.trace(this.context);
+				this.context.stroke();
+				this.context.restore();
+			},
+			renderTrails: function(shape) {
+				var entity = shape.centerPoint;
+
+				this.context.save();
+				//this.context.lineWidth = shape.boundRad.rad*2;
+				this.context.lineCap = this.context.lineJoin = "round";
+				this.context.beginPath();
+				this.context.moveTo(entity.pos.x, entity.pos.y);
+
+				for(var t = 0; t < entity.trail.length; ++t) {
+					var pos = entity.trail[t];
+					this.context.lineTo(pos.x, pos.y);
+				}
+
+				this.context.stroke();
+				this.context.restore();
 			}
 
 			/* When limiting this to within the edges of the environment, there
 				may be cases when one of the environment's dimensions extends
-				beyond that of the viewport - throw in an animation of a hamster on a
-				wheel running the game, just to show you thought of it... */
+				beyond that of the viewport - throw in something just to
+				show you thought of it... */
 		});
 
 		function Controller(lumens) {
@@ -1774,19 +1875,21 @@
 			this.settings = $.extend(true, {
 				size: Lumens.minSize,
 				viewport: {
-					mass: 20, size: Lumens.minSize, environment: this,
-					springInfluence: { factor: 0.5, restLength: 0 }
+					mass: 200, size: Lumens.minSize, environment: this,
+					springInfluence: {}, settings: { trails: true }
 				},
-				player: { mass: 10 },
+				player: { mass: 10, light: { rad: 100 } },
 				// for testing - don't want to set it this way permanently
 				predators: {
-					num: 0,
+					num: 100,
 					options: {
+						mass: 8,
 						swarmInfluence: {
-							swarm: null, neighbourRad: 60,
-							weight: { separation: 0.25, cohesion: 0.25, alignment: 0.25 }
+							swarm: null, neighbourRad: 90,
+							weight: { separation: 0.01, cohesion: 0.0001, alignment: 0.4 }
 						},
-						wanderInfluence: { range: 10, minSpeed: 20, weight: 0.25 }
+						wanderInfluence: { range: 0.6, minSpeed: 1, weight: 1 },
+						maxForce: 0.06
 					}
 				}
 			}, options);
@@ -1806,6 +1909,7 @@
 				this.addPredator();
 			}
 			
+			this.settings.player.pos = this.boundRect.size.scale(0.5);
 			this.player = new Firefly(this.settings.player);
 			this.entities.push(this.player);
 
@@ -1835,10 +1939,19 @@
 				this.viewport.shapeTree ... this.entityTree;
 			}).call, this); */
 			
+			this.frameUpdate = (options.frameUpdate || 1000);
+			this.frames = this.frameRate = 0;
 			this.time = Date.now();
 			this.state = Lumens.states.running;
 
 			var lumens = this;
+
+			setTimeout(function() {
+				lumens.frameRate = lumens.frames/(lumens.frameUpdate/1000);
+				lumens.frames = 0;
+				setTimeout(arguments.callee, lumens.frameUpdate);
+			}, this.frameUpdate);
+
 			requestAnimationFrame(function() { lumens.step(); });
 		}
 		$.extend(Lumens.prototype, {
@@ -1858,7 +1971,8 @@
 						var entity = this.entities[r].resolve(dt);
 
 						if(!this.boundRect.contains(entity.shape.boundRad
-							.containingAARect())) {
+							.containingAARect()) ||
+							!this.boundRect.contains(new AARect(entity.pos))) {
 							// TODO: proper collisions
 							this.clampToRange(entity);
 						}
@@ -1895,6 +2009,8 @@
 				this.viewport.resolve(dt);
 				this.setupViewport();
 				this.viewport.render();
+
+				this.frames++;
 
 				var lumens = this;
 				requestAnimationFrame(function() { lumens.step(); });
@@ -1943,7 +2059,7 @@
 			addPredator: function() {
 				var angle = Math.random()*2*Math.PI,
 					predator = new Predator($.extend({},
-					this.settings.predators.options, {
+						this.settings.predators.options, {
 							pos: new Vec2D(Math.random()*this.boundRect.size.x,
 								Math.random()*this.boundRect.size.y),
 							angle: new Vec2D(Math.cos(angle),
@@ -1974,11 +2090,15 @@
 			},
 			// Test - TODO: remove this
 			clampToRange: function(entity) {
-				if(entity.pos.x < 0) { entity.pos.x = this.boundRect.size.x; }
-				else if(entity.pos.x > this.boundRect.size.x) { entity.pos.x = 0; }
+				while(entity.pos.x < 0) { entity.pos.x += this.boundRect.size.x; }
+				while(entity.pos.x > this.boundRect.size.x) {
+					entity.pos.x -= this.boundRect.size.x;
+				}
 				
-				if(entity.pos.y < 0) { entity.pos.y = this.boundRect.size.y; }
-				else if(entity.pos.y > this.boundRect.size.y) { entity.pos.y = 0; }
+				while(entity.pos.y < 0) { entity.pos.y += this.boundRect.size.y; }
+				while(entity.pos.y > this.boundRect.size.y) {
+					entity.pos.y -= this.boundRect.size.y;
+				}
 
 				return this;
 			}
@@ -1995,7 +2115,8 @@
 	// }
 
 	$(function() {
-		var lumens = new Lumens({ viewport: { canvas: '#lumens' } });
+		var lumens = new Lumens({ viewport: { canvas: '#lumens' },
+			size: new Vec2D(2800, 3000) });
 
 		addGUI(lumens);
 	});
