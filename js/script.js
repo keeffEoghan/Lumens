@@ -89,6 +89,10 @@
 			equals: function(other) {
 				return (this.x === other.x && this.y === other.y);
 			},
+
+			pinToRange: function(min, max) {
+				return this.copy().doLimitToRange(min, max);
+			},
 			
 			mag: function() { return Math.sqrt(this.magSq()); },
 			
@@ -107,6 +111,14 @@
 			/* Mutators */
 			
 			doAdd: function(other) { this.x += other.x; this.y += other.y; return this; },
+
+			doPinToRange: function(min, max) {
+				if(max < min) { log("Vec2D Warning: max value less than min value"); }
+				var magSq = this.magSq(),
+					limitSq = Math.pinToRange(min*min, magSq, max*max);
+				if(magSq !== limitSq) { this.doUnit().doScale(Math.sqrt(limitSq)); }
+				return this;
+			},
 			
 			doMult: function(other) { this.x *= other.x; this.y *= other.y; return this; },
 			
@@ -720,9 +732,8 @@
 				}
 				else {
 					damp = from.sub(options.posTo).doUnit();
-					damp.doScale(($.isNumeric(options.damping)?
-							options.damping : 1)*
-						Math.max(-1*options.pointFrom.vel.dot(damp), 0));
+					damp.doScale(Math.max(-1*options.pointFrom.vel.dot(damp), 0)*
+						(($.isNumeric(options.damping))? options.damping : 1));
 				}
 
 				delete options.posFrom;
@@ -761,7 +772,7 @@
 				}
 			},
 			// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
-			// Number range, Vec2D vel
+			// { Number range, Vec2D vel }
 			wander: function(options) {
 				/* range is proportional to the distance either side of the current
 					heading within which the entity may wander (radius of wander circle)
@@ -773,13 +784,15 @@
 			},
 			/* Adapted from Craig Reynolds' famous Boids - http://www.red3d.com/cwr/boids/
 				and Harry Brundage's implementation, among others - http://harry.me/2011/02/17/neat-algorithms---flocking */
-			// QuadTree swarm, Particle member, Number neighbourRad, { Number separation, Number alignment, Number cohesion } weight
+			// { QuadTree swarm, Particle member, Number neighbourRad, { Number separation, Number alignment, Number cohesion } weight, Number predict (o) }
 			swarm: function(options) {
 				var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
 					totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
 					
-					neighbours = options.swarm.get(
-						(new Circle(options.member.pos.copy(),
+					predict = (options.predict || 0),
+					focus = options.member.vel.scale(predict)
+						.doAdd(options.member.pos),
+					neighbours = options.swarm.get((new Circle(focus,
 							options.neighbourRad)).containingAARect()),
 					
 					num = 0;
@@ -788,17 +801,19 @@
 					var neighbour = neighbours[n].item;
 					
 					if(options.member !== neighbour) {
-						var vector = options.member.pos.sub(neighbour.pos),
-							dist = vector.mag();
+						var neighbourFocus = neighbour.vel.scale(predict)
+								.doAdd(neighbour.pos),
+							vec = focus.sub(neighbourFocus),
+							dist = vec.mag();
 
 						if(dist < options.neighbourRad) {
 							++num;
 
 							var distFactor = options.neighbourRad/dist;
-							totalSeparation.doAdd(vector.doUnit()
+							totalSeparation.doAdd(vec.doUnit()
 								.doScale(distFactor*distFactor));
 							
-							totalCohesion.doAdd(neighbour.pos);
+							totalCohesion.doAdd(neighbourFocus).doSub(focus);
 							
 							var alignment = (neighbour.angle ||
 								((neighbour.vel.magSq())?
@@ -1204,7 +1219,7 @@
 			this.wanderInfluence = $.extend({ range: 0.6, minSpeed: 1,
 				weight: 1 }, options.wanderInfluence);
 			
-			this.swarmInfluence = $.extend({ swarm: null, member: this,
+			this.swarmInfluence = $.extend({ swarm: null, member: this, predict: 0,
 				neighbourRad: 90, weight: null }, options.swarmInfluence);
 			this.swarmInfluence.weight = $.extend({ separation: 0.01,
 				cohesion: 0.0001, alignment: 0.4 });
@@ -1237,14 +1252,17 @@
 							(new Vec2D(Math.cos(angle), Math.sin(angle)))
 								.doScale(this.wanderInfluence.minSpeed);
 					}
+
+					var swarmWeight = this.swarmInfluence.weight,
+						swarmWeights = swarmWeight.separation+swarmWeight.cohesion+
+							swarmWeight.alignment,
+						sumWeights = this.wanderInfluence.weight+swarmWeights;
 					
 					this.force.doAdd(Influence.swarm(this.swarmInfluence))
+						.doPinToRange(0, swarmWeights/sumWeights*this.maxForce)
 						.doAdd(Influence.wander(this.wanderInfluence)
-							.doScale(this.wanderInfluence.weight));
-
-					var magSq = this.force.magSq(),
-						maxMagSq = this.maxForce*this.maxForce;
-					if(magSq > maxMagSq) { this.force.doUnit().doScale(maxMagSq); }
+							.doScale(this.wanderInfluence.weight))
+						.doPinToRange(0, this.maxForce);
 				break;
 				
 				default:
@@ -1270,6 +1288,7 @@
 			var playerFolder = gui.addFolder("Player"),
 				predatorFolder = gui.addFolder("Predators"),
 				viewportFolder = gui.addFolder("Viewport"),
+				environmentFolder = gui.addFolder("Environment"),
 
 				/* Note that the alpha can't be 1 to work with dat.GUI */
 				player = { color: lumens.player.shape.color.toRGBA() },
@@ -1318,8 +1337,15 @@
 				setWeight(weight, "cohesion");
 			});
 			AIFolder.add(predSett.options.swarmInfluence.weight, "alignment",
-			0, 1).step(0.001).listen().onChange(function(weight) {
+			0, 10).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "alignment");
+			});
+
+			AIFolder.add(predSett.options.swarmInfluence, "predict",
+			0, 5).step(0.001).listen().onChange(function(predict) {
+				for(var p = 0; p < lumens.swarm.length; ++p) {
+					lumens.swarm[p].swarmInfluence.predict = predict;
+				}
 			});
 
 			var weight = { wander: predSett.options.wanderInfluence.weight };
@@ -1351,11 +1377,14 @@
 				viewportFolder.add(lumens.viewport.settings, setting);
 			}
 
-			viewportFolder.add(lumens.viewport, "zoomFactor", 0.1, 10).step(0.01)
+			viewportFolder.add(lumens.viewport, "zoomFactor", 0.1, 5).step(0.01)
 				.listen();
 			viewportFolder.add(lumens.viewport.springInfluence, "damping", 0, 1);
 			viewportFolder.add(lumens.viewport.springInfluence, "factor", 0, 1);
 			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1);
+
+			environmentFolder.add(lumens.boundRect.size, "x").listen();
+			environmentFolder.add(lumens.boundRect.size, "y").listen();
 
 			//gui.close();
 
@@ -1489,15 +1518,15 @@
 				/* Fit everything to the screen in question,
 					maintaining aspect ratio */
 				var width = this.$canvas.width(), height = this.$canvas.height(),
-					aspect = width/height;
+					aspect = width/height, zoom =1/this.zoomFactor;
 				
 				if(aspect >= 1) {
-					this.canvas.height = this.minRect.size.x*this.zoomFactor;
-					this.canvas.width = this.minRect.size.y*aspect*this.zoomFactor;
+					this.canvas.height = this.minRect.size.x*zoom;
+					this.canvas.width = this.minRect.size.y*aspect*zoom;
 				}
 				else {
-					this.canvas.width = this.minRect.size.x*this.zoomFactor;
-					this.canvas.height = this.minRect.size.y/aspect*this.zoomFactor;
+					this.canvas.width = this.minRect.size.x*zoom;
+					this.canvas.height = this.minRect.size.y/aspect*zoom;
 				}
 
 				var size = new Vec2D(this.canvas.width, this.canvas.height),
@@ -1876,7 +1905,7 @@
 				size: Lumens.minSize,
 				viewport: {
 					mass: 200, size: Lumens.minSize, environment: this,
-					springInfluence: {}, settings: { trails: true }
+					springInfluence: {}
 				},
 				player: { mass: 10, light: { rad: 100 } },
 				// for testing - don't want to set it this way permanently
@@ -1885,11 +1914,11 @@
 					options: {
 						mass: 8,
 						swarmInfluence: {
-							swarm: null, neighbourRad: 90,
-							weight: { separation: 0.01, cohesion: 0.0001, alignment: 0.4 }
+							swarm: null, neighbourRad: 90, predict: 0.6,
+							weight: { separation: 0.2, cohesion: 0.0004, alignment: 0.4 }
 						},
-						wanderInfluence: { range: 0.6, minSpeed: 1, weight: 1 },
-						maxForce: 0.06
+						wanderInfluence: { range: 0.6, minSpeed: 1, weight: 0.04 },
+						maxForce: 0.006
 					}
 				}
 			}, options);
@@ -1996,16 +2025,17 @@
 						this.entities[u].update(dt);
 					}
 					
-					/* Render */
-					/* Should be done asynchronously, through web workers:
-					// Render called in viewport
-					if(this.running) {
-						setTimeout(this.step.call, 1000/60, this);
-					} */
+					this.viewport.update();
 				}
 
+				/* Render */
+				/* Should be done asynchronously, through web workers:
+				// Render called in viewport
+				if(this.running) {
+					setTimeout(this.step.call, 1000/60, this);
+				} */
+
 				/* Clear and resize */
-				this.viewport.update();
 				this.viewport.resolve(dt);
 				this.setupViewport();
 				this.viewport.render();
@@ -2115,8 +2145,11 @@
 	// }
 
 	$(function() {
-		var lumens = new Lumens({ viewport: { canvas: '#lumens' },
-			size: new Vec2D(2800, 3000) });
+		var lumens = new Lumens({
+				//size: new Vec2D(2800, 3000),
+				viewport: { canvas: '#lumens',
+					settings: { trails: true, bounds: true } }
+			});
 
 		addGUI(lumens);
 	});
