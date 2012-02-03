@@ -1337,7 +1337,7 @@
 				setWeight(weight, "cohesion");
 			});
 			AIFolder.add(predSett.options.swarmInfluence.weight, "alignment",
-			0, 10).step(0.001).listen().onChange(function(weight) {
+			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "alignment");
 			});
 
@@ -1902,22 +1902,22 @@
 			if(!options) { options = {}; }
 
 			this.settings = $.extend(true, {
-				size: Lumens.minSize,
+				size: Lumens.minSize.copy(),
 				viewport: {
-					mass: 200, size: Lumens.minSize, environment: this,
+					mass: 200, size: Lumens.minSize.copy(), environment: this,
 					springInfluence: {}
 				},
 				player: { mass: 10, light: { rad: 100 } },
 				// for testing - don't want to set it this way permanently
 				predators: {
-					num: 100,
+					num: 300,
 					options: {
 						mass: 8,
 						swarmInfluence: {
 							swarm: null, neighbourRad: 90, predict: 0.6,
-							weight: { separation: 0.2, cohesion: 0.0004, alignment: 0.4 }
+							weight: { separation: 0.101, cohesion: 0.041, alignment: 0.999 }
 						},
-						wanderInfluence: { range: 0.6, minSpeed: 1, weight: 0.04 },
+						wanderInfluence: { range: 0.6, minSpeed: 1, weight: 0.025 },
 						maxForce: 0.006
 					}
 				}
@@ -2146,7 +2146,7 @@
 
 	$(function() {
 		var lumens = new Lumens({
-				//size: new Vec2D(2800, 3000),
+				size: new Vec2D(2500, 3000),
 				viewport: { canvas: '#lumens',
 					settings: { trails: true, bounds: true } }
 			});
