@@ -1,7 +1,12 @@
-window.log=function(){log.history=log.history||[];log.history.push(arguments);if(this.console){arguments.callee=arguments.callee.caller;var a=[].slice.call(arguments);(typeof console.log==="object"?log.apply.call(console.log,console,a):console.log.apply(console,a))}};
-(function(b){function c(){}for(var d="assert,count,debug,dir,dirxml,error,exception,group,groupCollapsed,groupEnd,info,log,timeStamp,profile,profileEnd,time,timeEnd,trace,warn".split(","),a;a=d.pop();){b[a]=b[a]||c}})((function(){try
-{console.log();return window.console;}catch(err){return window.console={};}})());
-	
+// usage: log('inside coolFunc', this, arguments);
+// paulirish.com/2009/log-a-lightweight-wrapper-for-consolelog/
+window.log = function f(){ log.history = log.history || []; log.history.push(arguments); if(this.console) { var args = arguments, newarr; args.callee = args.callee.caller; newarr = [].slice.call(args); if (typeof console.log === 'object') log.apply.call(console.log, console, newarr); else console.log.apply(console, newarr);}};
+
+// make it safe to use console.log always
+(function(a){function b(){}for(var c="assert,count,debug,dir,dirxml,error,exception,group,groupCollapsed,groupEnd,info,log,markTimeline,profile,profileEnd,time,timeEnd,trace,warn".split(","),d;!!(d=c.pop());){a[d]=a[d]||b;}})
+(function(){try{console.log();return window.console;}catch(a){return (window.console={});}}());
+
+
 /* Standardise requestAnimationFrame */
 if(!window.requestAnimationFrame) {
 	window.requestAnimationFrame =
@@ -17,11 +22,14 @@ if(!window.requestAnimationFrame) {
 
 (function($){
 	/* Math */
-	$.extend(Math, {
-		pinToRange: function(min, value, max) {
-			return Math.max(Math.min(value, max), min);
-		}
-	});
+	Math.pinToRange = function(min, value, max) {
+		return Math.max(Math.min(value, max), min);
+	};
+
+	Array.prototype.wrap = function(i) {
+		var offset = i%this.length;
+		return this[((offset < 0)? offset+this.length : offset)];
+	};
 	
 	$.extend({
 		/* Normalises vendor-specific CSS properties
@@ -50,7 +58,7 @@ if(!window.requestAnimationFrame) {
 						MozillaProp = ('Moz'+Prop).toCamelCase(true),
 						OracleProp = ('O'+Prop).toCamelCase(true);
 
-					$.support.standardisedCss[prop] = 
+					$.support.standardisedCss[prop] =
 						((div.style[WebkitProp] === '')? WebkitProp
 						:	((div.style[MozillaProp] === '')? MozillaProp
 						:	((div.style[OracleProp] === '')? OracleProp

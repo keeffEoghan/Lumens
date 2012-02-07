@@ -1,0 +1,21 @@
+Microsoft Visual Studio Solution File, Format Version 8.00
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "FluidDynamicsDemo", "FluidDynamicsDemo.vcproj", "{38466DF4-22A6-449A-9EB3-00D597A713DC}"
+	ProjectSection(ProjectDependencies) = postProject
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfiguration) = preSolution
+		Debug = Debug
+		Release = Release
+	EndGlobalSection
+	GlobalSection(ProjectConfiguration) = postSolution
+		{38466DF4-22A6-449A-9EB3-00D597A713DC}.Debug.ActiveCfg = Debug|Win32
+		{38466DF4-22A6-449A-9EB3-00D597A713DC}.Debug.Build.0 = Debug|Win32
+		{38466DF4-22A6-449A-9EB3-00D597A713DC}.Release.ActiveCfg = Release|Win32
+		{38466DF4-22A6-449A-9EB3-00D597A713DC}.Release.Build.0 = Release|Win32
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+	EndGlobalSection
+	GlobalSection(ExtensibilityAddIns) = postSolution
+	EndGlobalSection
+EndGlobal

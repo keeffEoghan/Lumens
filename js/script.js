@@ -116,7 +116,10 @@
 				if(max < min) { log("Vec2D Warning: max value less than min value"); }
 				var magSq = this.magSq(),
 					limitSq = Math.pinToRange(min*min, magSq, max*max);
-				if(magSq !== limitSq) { this.doUnit().doScale(Math.sqrt(limitSq)); }
+				
+				if(magSq && magSq !== limitSq) {
+					this.doUnit().doScale(Math.sqrt(limitSq));
+				}
 				return this;
 			},
 			
@@ -229,6 +232,7 @@
 		/* Convenience - maps the points of a circle with the given parameters,
 			and optionally executes a callback for each vertex */
 		Circle.generateVecs = function(num, rad, callback) {
+			// Note: clockwise winding
 			var points = [], v = 0, end = 2*Math.PI, i = end/(num-1);
 
 			for(var p = 0; p < num; v += i, ++p) {
@@ -1138,6 +1142,11 @@
 				}
 				
 				return this;
+			},
+			treeNode: function() {
+				var treeNode = this.shape.boundRad.containingAARect();
+				treeNode.item = this;
+				return treeNode;
 			}
 		});
 		Entity.states = new Enum("spawn", "normal", "dead");
@@ -1153,7 +1162,7 @@
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
 			var points = [], firefly = this;
-			Circle.generateVecs(10, 10, function(pos) {
+			Circle.generateVecs(10, 15, function(pos) {
 				points.push(new Particle({ pos: pos, invMass: firefly.invMass }));
 			});
 
@@ -1216,13 +1225,13 @@
 			/* TODO: change to Body */
 			Entity.call(this, Particle, options);
 
-			this.wanderInfluence = $.extend({ range: 0.6, minSpeed: 1,
-				weight: 1 }, options.wanderInfluence);
+			this.wanderInfluence = $.extend({ range: 0.6, minSpeed: 0.01,
+				vel: new Vec2D(), weight: 1 }, options.wanderInfluence);
 			
 			this.swarmInfluence = $.extend({ swarm: null, member: this, predict: 0,
 				neighbourRad: 90, weight: null }, options.swarmInfluence);
-			this.swarmInfluence.weight = $.extend({ separation: 0.01,
-				cohesion: 0.0001, alignment: 0.4 });
+			this.swarmInfluence.weight = $.extend({ separation: 0.401,
+				cohesion: 0.021, alignment: 1.001 });
 			
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
@@ -1248,21 +1257,23 @@
 					}
 					else {
 						var angle = Math.random()*2*Math.PI;
-						this.wanderInfluence.vel =
-							(new Vec2D(Math.cos(angle), Math.sin(angle)))
-								.doScale(this.wanderInfluence.minSpeed);
+						this.wanderInfluence.vel.copy(new Vec2D(Math.cos(angle),
+							Math.sin(angle))).doScale(this.wanderInfluence.minSpeed);
 					}
 
 					var swarmWeight = this.swarmInfluence.weight,
 						swarmWeights = swarmWeight.separation+swarmWeight.cohesion+
 							swarmWeight.alignment,
-						sumWeights = this.wanderInfluence.weight+swarmWeights;
+						wanderWeight = this.wanderInfluence.weight,
+						sumWeights = wanderWeight+swarmWeights,
+
+						swarm = Influence.swarm(this.swarmInfluence),
+						wander = Influence.wander(this.wanderInfluence)
+							.doScale(wanderWeight);
 					
-					this.force.doAdd(Influence.swarm(this.swarmInfluence))
-						.doPinToRange(0, swarmWeights/sumWeights*this.maxForce)
-						.doAdd(Influence.wander(this.wanderInfluence)
-							.doScale(this.wanderInfluence.weight))
-						.doPinToRange(0, this.maxForce);
+					this.force.doAdd(swarm
+						.doPinToRange(0, swarmWeights/sumWeights*this.maxForce))
+						.doAdd(wander.doPinToRange(0, wanderWeight/sumWeights*this.maxForce));
 				break;
 				
 				default:
@@ -1348,14 +1359,23 @@
 				}
 			});
 
-			var weight = { wander: predSett.options.wanderInfluence.weight };
+			var wander = predSett.options.wanderInfluence,
+				wanderSettings = { wander: wander.weight, minSpeed: wander.minSpeed };
 
-			AIFolder.add(weight, "wander", 0, 1).step(0.001)
+			AIFolder.add(wanderSettings, "wander", 0, 10).step(0.001)
 			.onChange(function(weight) {
-				predSett.options.wanderInfluence.weight = weight;
+				wander.weight = weight;
 
 				for(var p = 0; p < lumens.swarm.length; ++p) {
 					lumens.swarm[p].wanderInfluence.weight = weight;
+				}
+			});
+			AIFolder.add(wanderSettings, "minSpeed", 0, 10).step(0.001)
+			.onChange(function(speed) {
+				wander.minSpeed = speed;
+
+				for(var p = 0; p < lumens.swarm.length; ++p) {
+					lumens.swarm[p].wanderInfluence.minSpeed = speed;
 				}
 			});
 			
@@ -1377,8 +1397,6 @@
 				viewportFolder.add(lumens.viewport.settings, setting);
 			}
 
-			viewportFolder.add(lumens.viewport, "zoomFactor", 0.1, 5).step(0.01)
-				.listen();
 			viewportFolder.add(lumens.viewport.springInfluence, "damping", 0, 1);
 			viewportFolder.add(lumens.viewport.springInfluence, "factor", 0, 1);
 			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1);
@@ -1408,6 +1426,7 @@
 				this when the respective environment dimension is larger */
 			this.boundRect = new AARect();
 
+			// TODO: replace with a Vec3D position (change z to zoom in/out)
 			this.zoomFactor = (options.zoomFactor || 1);
 
 			this.shapeTree = null;	// QuadTree, only concerned with the shapes
@@ -1518,24 +1537,26 @@
 				/* Fit everything to the screen in question,
 					maintaining aspect ratio */
 				var width = this.$canvas.width(), height = this.$canvas.height(),
-					aspect = width/height, zoom =1/this.zoomFactor;
+					aspect = width/height, zoom = 1/this.zoomFactor;
 				
 				if(aspect >= 1) {
-					this.canvas.height = this.minRect.size.x*zoom;
-					this.canvas.width = this.minRect.size.y*aspect*zoom;
+					this.canvas.height = this.minRect.size.x;
+					this.canvas.width = this.minRect.size.y*aspect;
 				}
 				else {
-					this.canvas.width = this.minRect.size.x*zoom;
-					this.canvas.height = this.minRect.size.y/aspect*zoom;
+					this.canvas.width = this.minRect.size.x;
+					this.canvas.height = this.minRect.size.y/aspect;
 				}
 
-				var size = new Vec2D(this.canvas.width, this.canvas.height),
+				var size = new Vec2D(this.canvas.width, this.canvas.height)
+						.doScale(zoom),
 					margin = size.sub(this.minRect.size).doScale(0.5);
 				
 				this.boundRect.copy(new AARect(this.pos.sub(margin), size));
 
 				/* Position of minRect is centered in the canvas - have to think
 					carefully about this, the reverse of the direction you'd expect */
+				this.context.scale(this.zoomFactor, this.zoomFactor);
 				this.context.translate(-this.boundRect.pos.x, -this.boundRect.pos.y);
 
 				this.shapeTree = new QuadTree(this.boundRect.copy(), 8, 10);
@@ -1657,6 +1678,15 @@
 					ctrl.mousePos = ctrl.eventPos(e);
 					ctrl.events.aim.thing(ctrl.mousePos.sub(ctrl.lumens.player.pos)
 						.doUnit());
+				},
+				'mousewheel.transform DOMMouseScroll.transform': function(event) {
+					/* Normalise the wheeldata - http://www.switchonthecode.com/tutorials/javascript-tutorial-the-scroll-wheel */
+					var ctrl = event.data.ctrl,
+						e = event.originalEvent,
+						wheel = 1+(($.isNumeric(e.wheelDelta))?
+							e.wheelDelta : -e.detail*40)*0.001;
+
+					ctrl.lumens.viewport.zoomFactor *= wheel;
 				},
 				'keydown.lumens': function(e) {
 					var ctrl = e.data.ctrl;
@@ -1876,6 +1906,14 @@
 							}
 						}
 					}
+				},
+				'gesturechange': function(event) {
+					/* TODO: find a way to perform zoom gestures without confusing
+						them for normal movement - at edge of the screen? */
+					/*var ctrl = event.data.ctrl,
+						e = event.originalEvent;
+
+					ctrl.lumens.viewport.zoomFactor *= event.scale;*/
 				}
 			},
 			bindingWithTouch: function(touch) {
@@ -1891,6 +1929,63 @@
 					var binding = this.bindings[b], e = this.events[event];
 					if(binding.event == e) { return binding; }
 				}
+			}
+		});
+
+
+		function Collider(environment, entityTree, limit) {
+			this.environment = environment;
+			this.entityTree = entityTree;
+			this.limit = (limit || 10);
+		}
+		$.extend(Collider.prototype, {
+			check: function(entity, callbacks) {
+				var treeNode = entity.treeNode(),
+					neighbours = this.entityTree.get(treeNode),
+					collisions = [];
+
+				callbacks = ((callbacks)?
+						(($.isArray(callbacks))? callbacks : [callbacks])
+					:	[]);
+				
+				for(var n = 0; n < neighbours.length; ++n) {
+					var neighbour = neighbours[n];
+
+					if(neighbour.intersects(treeNode)) {
+						collisions.push(neighbour.item);
+						// TODO: narrow-phase collision
+						for(var c0 = 0; c0 < callbacks.length; ++c0) {
+							callback(neighbour.item);
+						}
+					}
+				}
+
+				if(!this.environment.boundRect.intersects(treeNode) ||
+				!this.environment.boundRect.contains(treeNode)) {
+					collisions.push(this.environment);
+					for(var c1 = 0; c1 < callbacks.length; ++c1) {
+						callback(this.environment);
+					}
+				}
+
+				return collisions;
+			},
+			resolve: function(entity) {
+				for(var checks = 0; checks < this.limit; ++checks) {
+					// TODO: resolve the collision
+					this.check(entity, this.resolve);
+				}
+				/*
+				recursive version - jsperf says it's slower:
+				var checks = (checks || 0),
+					check = this.check(entity);
+				if((check.length) {
+					for(var c = 0; c < check.length; ++c) {
+						// resolve the entity collision
+					}
+					if(++checks < this.limit) { this.resolve(entity); }
+				}
+				else { return false; } */
 			}
 		});
 	// }
@@ -1915,9 +2010,9 @@
 						mass: 8,
 						swarmInfluence: {
 							swarm: null, neighbourRad: 90, predict: 0.6,
-							weight: { separation: 0.101, cohesion: 0.041, alignment: 0.999 }
+							weight: { separation: 0.004, cohesion: 0.0002, alignment: 0.01 }
 						},
-						wanderInfluence: { range: 0.6, minSpeed: 1, weight: 0.025 },
+						wanderInfluence: { range: 0.6, minSpeed: 0.8, weight: 3.501 },
 						maxForce: 0.006
 					}
 				}
@@ -1943,10 +2038,11 @@
 			this.entities.push(this.player);
 
 			this.settings.viewport.springInfluence.posTo = this.player.pos;
-			
 			this.viewport = new Viewport(this.settings.viewport);
+
 			this.controller = Controller.make(this);
-			//this.collider = new Collider();
+			
+			this.collider = new Collider(this, this.entityTree);
 			//this.persistor = new Persistor();
 			//this.networker = new Networker();
 
@@ -1997,24 +2093,22 @@
 					
 					/* Resolve everything */
 					for(var r = 0; r < this.entities.length; ++r) {
-						var entity = this.entities[r].resolve(dt);
+						var entity = this.entities[r].resolve(dt),
+							collisions = this.collider.check(entity);
 
-						if(!this.boundRect.contains(entity.shape.boundRad
-							.containingAARect()) ||
-							!this.boundRect.contains(new AARect(entity.pos))) {
-							// TODO: proper collisions
-							this.clampToRange(entity);
+						for(var c = 0; c < collisions.length; ++c) {
+							if(collisions[c] === this) {
+								this.clampToRange(entity);
+							}
 						}
 
-						var treeItem = entity.shape.boundRad.containingAARect();
-						
-						treeItem.item = entity;
+						var treeNode = entity.treeNode();
 						
 						/* Populate Quadtrees */
-						this.entityTree.add(treeItem);
+						this.entityTree.add(treeNode);
 						
-						if(this.swarm.indexOf(entity) !== -1) {
-							this.swarmTree.add(treeItem);
+						if(entity.constructor === Predator) {
+							this.swarmTree.add(treeNode);
 						}
 					}
 
@@ -2050,21 +2144,20 @@
 			setupViewport: function() {
 				for(var r = 0; r < this.entities.length; ++r) {
 					var entity = this.entities[r],
-						treeItem = entity.shape.boundRad.containingAARect();
+						treeNode = entity.shape.boundRad.containingAARect();
 
-					treeItem.item = entity.shape;
+					treeNode.item = entity.shape;
 
-					if(this.viewport.shapeTree.root.boundRect
-						.intersects(treeItem)) {
+					if(this.viewport.boundRect.intersects(treeNode)) {
 						this.viewport.shapes.push(entity.shape);
-						this.viewport.shapeTree.add(treeItem);
+						this.viewport.shapeTree.add(treeNode);
 					}
-					if(entity.light && entity.light.containingAARect()
-						.intersects(this.viewport.boundRect)) {
+					if(entity.light && this.viewport.boundRect
+						.intersects(entity.light.containingAARect())) {
 						this.viewport.lights.push(entity.light);
 					}
-					if(entity.glow && entity.glow.containingAARect()
-						.intersects(this.viewport.boundRect)) {
+					if(entity.glow && this.viewport.boundRect
+						.intersects(entity.glow.containingAARect())) {
 						this.viewport.glows.push(entity.glow);
 					}
 				}
@@ -2146,7 +2239,7 @@
 
 	$(function() {
 		var lumens = new Lumens({
-				size: new Vec2D(2500, 3000),
+				size: new Vec2D(3000, 2000),
 				viewport: { canvas: '#lumens',
 					settings: { trails: true, bounds: true } }
 			});
