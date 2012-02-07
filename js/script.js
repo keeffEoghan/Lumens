@@ -2283,7 +2283,7 @@
 		var lumens = new Lumens({
 				size: new Vec2D(3000, 2000),
 				viewport: { canvas: '#lumens',
-					settings: { trails: true, bounds: true, tree: true } }
+					settings: { trails: true, bounds: true } }
 			});
 
 		addGUI(lumens);
