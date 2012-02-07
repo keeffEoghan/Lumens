@@ -172,6 +172,10 @@
 				else {
 					return new this.constructor(this.pos.copy(), this.size.copy());
 				}
+			},
+			trace: function(context) {
+				context.rect(this.pos.x, this.pos.y, this.size.x, this.size.y);
+				return this;
 			}
 		});
 
@@ -224,7 +228,6 @@
 				}
 			},
 			trace: function(context) {
-				context.beginPath();
 				context.arc(this.pos.x, this.pos.y, this.rad, 0, 2*Math.PI);
 				return this;
 			}
@@ -305,7 +308,7 @@
 					if($.isArray(item)) {
 						for(var i = 0; i < item.length; ++i) { this.add(item[i]); }
 					}
-					else if(this.nodes.length) { this.nodes[this.index(item)].add(item); }
+					else if(this.nodes.length) { this.node(item).add(item); }
 					else {
 						this.kids.push(item);
 
@@ -330,20 +333,16 @@
 				}
 				else {
 					return ((this.nodes.length)?
-						this.nodes[this.index(item)].get(item) : this.kids);
+						this.node(item).get(item) : this.kids);
 				}
 			},
-			index: function(item) {
-				var left = (item.x <= this.boundRect.pos.x+this.boundRect.size.x/2);
-				var top = (item.y <= this.boundRect.pos.y+this.boundRect.size.y/2);
+			node: function(item) {
+				var lR = ((item.pos.x <= this.boundRect.pos.x+this.boundRect.size.x/2)?
+						"Left" : "Right"),
+					tB = ((item.pos.y <= this.boundRect.pos.y+this.boundRect.size.y/2)?
+						"top" : "bottom");
 
-				return ((left)?
-						((top)?
-							Node.corners.topLeft
-						:	Node.corners.bottomLeft)
-					:	((top)?
-							Node.corners.topRight
-						:	Node.corners.bottomRight));
+				return this.nodes[Node.corners[tB+lR]];
 			},
 			split: function() {
 				var depth = this.depth+1,
@@ -356,19 +355,19 @@
 				
 				this.nodes[Node.corners.topLeft] = new this.constructor(
 					new AARect(this.boundRect.pos.copy(), halfSize.copy()),
-					depth, this.maxDepth);
+					depth, this.maxDepth, this.maxKids);
 				
 				this.nodes[Node.corners.topRight] = new this.constructor(
 					new AARect(new Vec2D(rightHalf, this.boundRect.pos.y),
-						halfSize.copy()), depth, this.maxDepth);
+						halfSize.copy()), depth, this.maxDepth, this.maxKids);
 				
 				this.nodes[Node.corners.bottomLeft] = new this.constructor(
 					new AARect(new Vec2D(this.boundRect.pos.x, bottomHalf),
-						halfSize.copy()), depth, this.maxDepth);
+						halfSize.copy()), depth, this.maxDepth, this.maxKids);
 				
 				this.nodes[Node.corners.bottomRight] = new this.constructor(
 					new AARect(new Vec2D(rightHalf, bottomHalf), halfSize.copy()),
-					depth, this.maxDepth);
+					depth, this.maxDepth, this.maxKids);
 				
 				return this;
 			},
@@ -398,9 +397,9 @@
 						for(var i = 0; i < item.length; ++i) { this.add(item[i]); }
 					}
 					else if(this.nodes.length) {
-						var node = this.nodes[this.index(item)];
+						var nodes = this.node(item);
 						
-						if(node.boundRect.contains(item)) { node.add(item); }
+						if(nodes.length === 1) { nodes[0].add(item); }
 						else { this.borderKids.push(item); }
 					}
 					else {
@@ -424,13 +423,31 @@
 						kids = kids.concat(this.get(item[i]));
 					}
 				}
-				else {
-					kids = kids.concat(((this.nodes.length)?
-							this.nodes[this.index(item)].get(item) : this.kids),
-						this.borderKids);
+				else if(this.nodes.length) {
+					var nodes = this.node(item);
+
+					for(var n = 0; n < nodes.length; ++n) {
+						kids = kids.concat(nodes[n].get(item));
+					}
 				}
+				else { kids = kids.concat(this.kids); }
 				
-				return kids;
+				return kids.concat(this.borderKids);
+			},
+			/* NOTE: for bounds nodes, this returns an array of nodes for any
+				intersecting the item, not a single node */
+			node: function(item) {
+				var nodes = [];
+				for(var n = 0; n < this.nodes.length; ++n) {
+					var node = this.nodes[n];
+					if(node.boundRect.contains(item)) {
+						nodes.push(node);
+						break;
+					}
+					else if(node.boundRect.intersects(item)) { nodes.push(node); }
+				}
+
+				return nodes;
 			},
 			clear: function() {
 				this.borderKids.length = 0;
@@ -1143,10 +1160,10 @@
 				
 				return this;
 			},
-			treeNode: function() {
-				var treeNode = this.shape.boundRad.containingAARect();
-				treeNode.item = this;
-				return treeNode;
+			treeItem: function() {
+				var treeItem = this.shape.boundRad.containingAARect();
+				treeItem.item = this;
+				return treeItem;
 			}
 		});
 		Entity.states = new Enum("spawn", "normal", "dead");
@@ -1393,8 +1410,8 @@
 				}
 			});
 
-			for(var setting in lumens.viewport.settings) {
-				viewportFolder.add(lumens.viewport.settings, setting);
+			for(var s in lumens.viewport.settings) {
+				viewportFolder.add(lumens.viewport.settings, s);
 			}
 
 			viewportFolder.add(lumens.viewport.springInfluence, "damping", 0, 1);
@@ -1446,11 +1463,12 @@
 			this.lights = (options.lights || []);
 			this.glows = (options.glows || []);
 
-			this.settings = $.extend({
+			this.settings = $.extend(true, {
 				bounds: false,
 				trails: false,
 				health: false,
-				states: false
+				states: false,
+				tree: false
 			}, options.settings);
 
 			this.debugColor = (options.debugColor || new Color(0, 1, 0.3, 0.7));
@@ -1473,15 +1491,16 @@
 
 				for(var l = 0; l < this.lights.length; ++l) {
 					var light = this.lights[l],
-						neighbours = ((this.shapeTree)?
-							this.shapeTree.get((new Circle(light.pos.copy(),
-								light.rad)).containingAARect()) : null);
+						lit = ((this.shapeTree)?
+							this.shapeTree.get(light.containingAARect()) : null);
 					
-					for(var n = 0; n < neighbours.length; ++n) {
-						var neighbour = neighbours[n].item;
+					if(lit) {
+						for(var lT = 0; lT < lit.length; ++lT) {
+							var litBody = lit[lT].item;
 
-						if(neighbour.boundRad.intersects(light)) {
-							litBodies.push(neighbour);
+							if(litBody.boundRad.intersects(light)) {
+								litBodies.push(litBody);
+							}
 						}
 					}
 
@@ -1559,7 +1578,7 @@
 				this.context.scale(this.zoomFactor, this.zoomFactor);
 				this.context.translate(-this.boundRect.pos.x, -this.boundRect.pos.y);
 
-				this.shapeTree = new QuadTree(this.boundRect.copy(), 8, 10);
+				this.shapeTree = new QuadTree(this.boundRect.copy(), 5, 8);
 
 				return this;
 			},
@@ -1570,29 +1589,35 @@
 				return this;
 			},
 			renderDebug: function() {
+				this.context.save();
+				this.context.globalCompositeOperation = 'source-over';
+				this.context.strokeStyle = this.debugColor.RGBAString();
+
 				var renderFuncs = [];
 
 				if(this.settings.bounds) { renderFuncs.push(this.renderBoundRad); }
-				if(this.settings.trails) { renderFuncs.push(this.renderTrails); }
+				if(this.settings.trails) { renderFuncs.push(this.renderTrail); }
 
-				if(renderFuncs.length) {
-					this.context.globalCompositeOperation = 'source-over';
-					this.context.strokeStyle = this.debugColor.RGBAString();
-
+				for(var f = 0; f < renderFuncs.length; ++f) {
 					for(var s = 0; s < this.shapes.length; ++s) {
-						for(var f = 0; f < renderFuncs.length; ++f) {
-							renderFuncs[f].call(this, this.shapes[s]);
-						}
+						renderFuncs[f].call(this, this.shapes[s]);
 					}
 				}
+
+				if(this.settings.tree) { this.renderTree(); }
+
+				this.context.restore();
 			},
 			renderBoundRad: function(shape) {
 				this.context.save();
+				this.context.beginPath();
 				shape.boundRad.trace(this.context);
 				this.context.stroke();
 				this.context.restore();
+
+				return this;
 			},
-			renderTrails: function(shape) {
+			renderTrail: function(shape) {
 				var entity = shape.centerPoint;
 
 				this.context.save();
@@ -1608,6 +1633,25 @@
 
 				this.context.stroke();
 				this.context.restore();
+
+				return this;
+			},
+			renderTree: function() {
+				(function(node) {
+					if(node.nodes.length) {
+						for(var n = 0; n < node.nodes.length; ++n) {
+							arguments.callee.call(this, node.nodes[n]);
+						}
+					}
+					else {
+						this.context.save();
+						node.boundRect.trace(this.context);
+						this.context.stroke();
+						this.context.restore();
+					}
+				}).call(this, this.shapeTree.root);
+
+				return this;
 			}
 
 			/* When limiting this to within the edges of the environment, there
@@ -1940,9 +1984,9 @@
 		}
 		$.extend(Collider.prototype, {
 			check: function(entity, callbacks) {
-				var treeNode = entity.treeNode(),
-					neighbours = this.entityTree.get(treeNode),
-					collisions = [];
+				var treeItem = entity.treeItem(),
+					neighbours = this.entityTree.get(treeItem),
+					collisions = [], c = 0;
 
 				callbacks = ((callbacks)?
 						(($.isArray(callbacks))? callbacks : [callbacks])
@@ -1951,20 +1995,20 @@
 				for(var n = 0; n < neighbours.length; ++n) {
 					var neighbour = neighbours[n];
 
-					if(neighbour.intersects(treeNode)) {
+					if(neighbour.intersects(treeItem)) {
 						collisions.push(neighbour.item);
 						// TODO: narrow-phase collision
-						for(var c0 = 0; c0 < callbacks.length; ++c0) {
-							callback(neighbour.item);
+						for(c = 0; c < callbacks.length; ++c) {
+							callbacks[c].call(this, neighbour.item);
 						}
 					}
 				}
 
-				if(!this.environment.boundRect.intersects(treeNode) ||
-				!this.environment.boundRect.contains(treeNode)) {
+				if(!this.environment.boundRect.intersects(treeItem) ||
+				!this.environment.boundRect.contains(treeItem)) {
 					collisions.push(this.environment);
-					for(var c1 = 0; c1 < callbacks.length; ++c1) {
-						callback(this.environment);
+					for(c = 0; c < callbacks.length; ++c) {
+						callbacks[c].call(this, this.environment);
 					}
 				}
 
@@ -2024,8 +2068,8 @@
 			this.entities = [];
 			this.swarm = [];
 			
-			this.entityTree = new QuadTree(this.boundRect.copy(), 8, 10);
-			this.swarmTree = new QuadTree(this.boundRect.copy(), 8, 10);
+			this.entityTree = new QuadTree(this.boundRect.copy(), 5, 8);
+			this.swarmTree = new QuadTree(this.boundRect.copy(), 5, 8);
 
 			this.settings.predators.options.swarmInfluence.swarm = this.swarmTree;
 			
@@ -2081,8 +2125,8 @@
 		}
 		$.extend(Lumens.prototype, {
 			step: function() {
-				var currentTime = Date.now(),
-					dt = currentTime-this.time;
+				var lumens = this,
+					currentTime = Date.now(), dt = currentTime-this.time;
 				
 				this.time = currentTime;
 
@@ -2093,22 +2137,21 @@
 					
 					/* Resolve everything */
 					for(var r = 0; r < this.entities.length; ++r) {
-						var entity = this.entities[r].resolve(dt),
-							collisions = this.collider.check(entity);
-
-						for(var c = 0; c < collisions.length; ++c) {
-							if(collisions[c] === this) {
-								this.clampToRange(entity);
+						var entity = this.entities[r].resolve(dt);
+						
+						collisions = this.collider.check(entity, function(collision) {
+							if(collision === lumens) {
+								lumens.clampToRange(entity);
 							}
-						}
+						});
 
-						var treeNode = entity.treeNode();
+						var treeItem = entity.treeItem();
 						
 						/* Populate Quadtrees */
-						this.entityTree.add(treeNode);
+						this.entityTree.add(treeItem);
 						
 						if(entity.constructor === Predator) {
-							this.swarmTree.add(treeNode);
+							this.swarmTree.add(treeItem);
 						}
 					}
 
@@ -2136,7 +2179,6 @@
 
 				this.frames++;
 
-				var lumens = this;
 				requestAnimationFrame(function() { lumens.step(); });
 
 				return this;
@@ -2144,13 +2186,13 @@
 			setupViewport: function() {
 				for(var r = 0; r < this.entities.length; ++r) {
 					var entity = this.entities[r],
-						treeNode = entity.shape.boundRad.containingAARect();
+						treeItem = entity.shape.boundRad.containingAARect();
 
-					treeNode.item = entity.shape;
+					treeItem.item = entity.shape;
 
-					if(this.viewport.boundRect.intersects(treeNode)) {
+					if(this.viewport.boundRect.intersects(treeItem)) {
 						this.viewport.shapes.push(entity.shape);
-						this.viewport.shapeTree.add(treeNode);
+						this.viewport.shapeTree.add(treeItem);
 					}
 					if(entity.light && this.viewport.boundRect
 						.intersects(entity.light.containingAARect())) {
@@ -2241,7 +2283,7 @@
 		var lumens = new Lumens({
 				size: new Vec2D(3000, 2000),
 				viewport: { canvas: '#lumens',
-					settings: { trails: true, bounds: true } }
+					settings: { trails: true, bounds: true, tree: true } }
 			});
 
 		addGUI(lumens);
