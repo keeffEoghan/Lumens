@@ -1172,6 +1172,37 @@
 				var treeItem = this.shape.boundRad.containingAARect();
 				treeItem.item = this;
 				return treeItem;
+			},
+			collisions: function(entityTree, environment, callback, args) {
+				var treeItem = this.treeItem(),
+					neighbours = entityTree.get(treeItem),
+					collisions = [];
+				
+				for(var n = 0; n < neighbours.length; ++n) {
+					var neighbour = neighbours[n];
+
+					if(neighbour.intersects(treeItem)) {
+						collisions.push(neighbour.item);
+						// TODO: narrow-phase collision
+						if(callback) {
+							callback.apply(null,
+								Array.prototype.slice.call(arguments, 3)
+									.concat(neighbour.item));
+						}
+					}
+				}
+
+				if(!environment.boundRect.intersects(treeItem)) {
+					collisions.push(environment);
+					
+					if(callback) {
+						callback.apply(null,
+							Array.prototype.slice.call(arguments, 3)
+								.concat(environment));
+					}
+				}
+
+				return collisions;
 			}
 		});
 		Entity.states = new Enum("spawn", "normal", "dead");
@@ -1483,6 +1514,83 @@
 				call to render, which calls clear at the end */
 		}
 		$.extend(Viewport.prototype, Particle.prototype, {
+			resize: function() {
+				/* Fit everything to the screen in question,
+					maintaining aspect ratio */
+				var width = this.$canvas.width(), height = this.$canvas.height(),
+					aspect = width/height, zoom = 1/this.zoomFactor;
+
+				this.boundRect.size.copy(((aspect >= 1)?
+						new Vec2D(this.minRect.size.x*aspect, this.minRect.size.y)
+					:	new Vec2D(this.minRect.size.x, this.minRect.size.y/aspect))
+					.doScale(zoom));
+
+				return this;
+			},
+			reposition: function() {
+				var margin = this.boundRect.size.sub(this.minRect.size).doScale(0.5);	// Could be made a member to prevent repeated calculations, but it doesn't really belong there
+
+				this.boundRect.pos.copy(this.pos.sub(margin));
+
+				return this;
+			},
+			resolve: function(dt) {
+				Particle.prototype.resolve.call(this, dt);
+
+				this.reposition();
+				this.collisions(invoke, this, this.resolveCollision);
+
+				return this;
+			},
+			collisions: function(callback, args) {
+				var collisions = [];
+				
+				if(this.environment) {
+					if(!this.environment.boundRect.contains(this.boundRect)) {
+						collisions.push(this.environment);
+						
+						if(callback) {
+							callback.apply(null,
+								Array.prototype.slice.call(arguments, 1)
+									.concat(this.environment));
+						}
+					}
+				}
+
+				return collisions;
+			},
+			resolveCollision: function(environment) {
+				var size = this.boundRect.size,
+					envSize = this.environment.boundRect.size;
+
+				if(size.x < envSize.x && size.y < envSize.y) {
+					/* Resolve as normal - do not exceed environment bounds
+						Maybe soft collision - press in then settle back? */
+				}
+				else {
+					if(size.x >= envSize.x) {
+						this.pos.x = (envSize.x-this.minRect.size.x)/2;
+					}
+					if(size.y >= envSize.y) {
+						this.pos.y = (envSize.y-this.minRect.size.y)/2;
+					}
+				}
+
+				return this.reposition();
+			},
+			setup: function() {
+				this.canvas.width = this.boundRect.size.x*this.zoomFactor;
+				this.canvas.height = this.boundRect.size.y*this.zoomFactor;
+				
+				/* Position of minRect is centered in the canvas - have to think
+					about this, the reverse of the direction you'd expect */
+				this.context.scale(this.zoomFactor, this.zoomFactor);
+				this.context.translate(-this.boundRect.pos.x, -this.boundRect.pos.y);
+
+				this.shapeTree = new QuadTree(this.boundRect.copy(), 5, 8);
+
+				return this;
+			},
 			render: function() {
 				this.context.save();
 
@@ -1543,51 +1651,24 @@
 
 				return this;
 			},
-			update: function() {
-				var from = new Particle(this);
-				from.pos = this.pos.add(this.minRect.size.scale(0.5));
-
-				this.springInfluence.pointFrom = from;
-				this.force.doAdd(Influence.dampedSpring(this.springInfluence));
-
-				return this;
-			},
-			resolve: function(dt) {
-				Particle.prototype.resolve.call(this, dt);
-
-				/* Fit everything to the screen in question,
-					maintaining aspect ratio */
-				var width = this.$canvas.width(), height = this.$canvas.height(),
-					aspect = width/height, zoom = 1/this.zoomFactor;
-				
-				if(aspect >= 1) {
-					this.canvas.height = this.minRect.size.x;
-					this.canvas.width = this.minRect.size.y*aspect;
-				}
-				else {
-					this.canvas.width = this.minRect.size.x;
-					this.canvas.height = this.minRect.size.y/aspect;
-				}
-
-				var size = new Vec2D(this.canvas.width, this.canvas.height)
-						.doScale(zoom),
-					margin = size.sub(this.minRect.size).doScale(0.5);
-				
-				this.boundRect.copy(new AARect(this.pos.sub(margin), size));
-
-				/* Position of minRect is centered in the canvas - have to think
-					carefully about this, the reverse of the direction you'd expect */
-				this.context.scale(this.zoomFactor, this.zoomFactor);
-				this.context.translate(-this.boundRect.pos.x, -this.boundRect.pos.y);
-
-				this.shapeTree = new QuadTree(this.boundRect.copy(), 5, 8);
-
-				return this;
-			},
 			clear: function() {
 				this.shapes.length = this.lights.length = this.glows.length = 0;
 				if(this.shapeTree) { this.shapeTree.clear(); }
 				
+				return this;
+			},
+			update: function() {
+				var size = this.boundRect.size,
+					envSize = this.environment.boundRect.size;
+
+				if(!this.environment || size.x < envSize.x || size.y < envSize.y) {
+					var from = new Particle(this);
+					
+					from.pos = this.pos.add(this.minRect.size.scale(0.5));
+					this.springInfluence.pointFrom = from;
+					this.force.doAdd(Influence.dampedSpring(this.springInfluence));
+				}
+
 				return this;
 			},
 			renderDebug: function() {
@@ -1977,47 +2058,6 @@
 				}
 			}
 		});
-
-
-		function Collider(environment, entityTree, limit) {
-			this.environment = environment;
-			this.entityTree = entityTree;
-			this.limit = (limit || 10);
-		}
-		$.extend(Collider.prototype, {
-			check: function(entity, callback, args) {
-				var treeItem = entity.treeItem(),
-					neighbours = this.entityTree.get(treeItem),
-					collisions = [];
-				
-				for(var n = 0; n < neighbours.length; ++n) {
-					var neighbour = neighbours[n];
-
-					if(neighbour.intersects(treeItem)) {
-						collisions.push(neighbour.item);
-						// TODO: narrow-phase collision
-						if(callback) {
-							callback.apply(null,
-								Array.prototype.slice.call(arguments, 2)
-									.concat(neighbour.item));
-						}
-					}
-				}
-
-				if(!this.environment.boundRect.intersects(treeItem) ||
-				!this.environment.boundRect.contains(treeItem)) {
-					collisions.push(this.environment);
-					
-					if(callback) {
-						callback.apply(null,
-							Array.prototype.slice.call(arguments, 2)
-								.concat(this.environment));
-					}
-				}
-
-				return collisions;
-			}
-		});
 	// }
 
 	// MAIN {
@@ -2071,8 +2111,7 @@
 			this.viewport = new Viewport(this.settings.viewport);
 
 			this.controller = Controller.make(this);
-			
-			this.collider = new Collider(this, this.entityTree);
+
 			//this.persistor = new Persistor();
 			//this.networker = new Networker();
 
@@ -2116,7 +2155,11 @@
 				
 				this.time = currentTime;
 
+				this.viewport.resize();
+
 				if(this.state === Lumens.states.running) {
+					this.viewport.resolve(dt);
+
 					/* Clear the Quadtrees */
 					this.entityTree.clear();
 					this.swarmTree.clear();
@@ -2125,7 +2168,7 @@
 					for(var r = 0; r < this.entities.length; ++r) {
 						var entity = this.entities[r].resolve(dt);
 						
-						collisions = this.collider.check(entity,
+						entity.collisions(this.entityTree, this,
 							invoke, this, this.clampToRange, entity);
 
 						var treeItem = entity.treeItem();
@@ -2155,9 +2198,8 @@
 					setTimeout(this.step.call, 1000/60, this);
 				} */
 
-				/* Clear and resize */
-				this.viewport.resolve(dt);
-				this.setupViewport();
+				this.viewport.setup();
+				this.populateViewport();
 				this.viewport.render();
 
 				this.frames++;
@@ -2166,7 +2208,7 @@
 
 				return this;
 			},
-			setupViewport: function() {
+			populateViewport: function() {
 				for(var r = 0; r < this.entities.length; ++r) {
 					var entity = this.entities[r],
 						treeItem = entity.shape.boundRad.containingAARect();
