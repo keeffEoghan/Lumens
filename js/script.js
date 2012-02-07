@@ -2,6 +2,13 @@
 
 (function($) {
 	// UTIL {
+		/* Static wrapper for apply
+			Maintains the this value no matter how many times it's passed around
+			Useful for callbacks */
+		function invoke(obj, func, args) {
+			func.apply(obj, Array.prototype.slice.call(arguments, 2));
+		}
+
 		/* Simple observable class: subscribe/unsubscribe with id and
 			callback function, called on change */
 		function Watchable(thing) {
@@ -18,7 +25,7 @@
 			update: function() {
 				for(var c in this.callbacks) {
 					var callback = this.callbacks[c];
-					callback.func.apply(null, [this._thing].concat(callback.args));
+					callback.func.apply(null, callback.args.concat(this._thing));
 				}
 
 				return this;
@@ -234,14 +241,15 @@
 		});
 		/* Convenience - maps the points of a circle with the given parameters,
 			and optionally executes a callback for each vertex */
-		Circle.generateVecs = function(num, rad, callback) {
+		Circle.generateVecs = function(num, rad, callback, args) {
 			// Note: clockwise winding
 			var points = [], v = 0, end = 2*Math.PI, i = end/(num-1);
 
 			for(var p = 0; p < num; v += i, ++p) {
 				var pos = new Vec2D(rad*Math.cos(v), rad*Math.sin(v));
 
-				if(callback) { callback(pos); }
+				if(callback) { callback.apply(null,
+					Array.prototype.slice.call(arguments, 3).concat(pos)); }
 				points.push(pos);
 			}
 
@@ -1178,9 +1186,9 @@
 			
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
-			var points = [], firefly = this;
-			Circle.generateVecs(10, 15, function(pos) {
-				points.push(new Particle({ pos: pos, invMass: firefly.invMass }));
+			var points = [];
+			Circle.generateVecs(10, 15, invoke, this, function(pos) {
+				points.push(new Particle({ pos: pos, invMass: this.invMass }));
 			});
 
 			/*this.shape = (new SoftShape({ centerPoint: this,
@@ -1204,31 +1212,25 @@
 
 				return this;
 			},
-			move: function(force, firefly) {
-				firefly = (firefly || this);
-				firefly.inputForce = ((force)? force.scale(firefly.maxForce) : null);
-				return firefly;
+			move: function(force) {
+				this.inputForce = ((force)? force.scale(this.maxForce) : null);
+				return this;
 			},
-			aim: function(angle, firefly) {
-				firefly = (firefly || this);
-				//firefly.torque.doAdd(angle*firefly.maxTorque);
-				return firefly;
+			aim: function(angle) {
+				//this.torque.doAdd(angle*this.maxTorque);
+				return this;
 			},
-			attack: function(active, firefly) {
-				firefly = (firefly || this);
-				return firefly;
+			attack: function(active) {
+				return this;
 			},
-			beam: function(active, firefly) {
-				firefly = (firefly || this);
-				return firefly;
+			beam: function(active) {
+				return this;
 			},
-			repel: function(active, firefly) {
-				firefly = (firefly || this);
-				return firefly;
+			repel: function(active) {
+				return this;
 			},
-			range: function(active, firefly) {
-				firefly = (firefly || this);
-				return firefly;
+			range: function(active) {
+				return this;
 			}
 		});
 		Firefly.states = $.extend({}, Entity.states,
@@ -1252,9 +1254,9 @@
 			
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
-			var points = [], predator = this;
-			Circle.generateVecs(8, 7, function(pos) {
-				points.push(new Particle({ pos: pos, invMass: predator.invMass }));
+			var points = [];
+			Circle.generateVecs(8, 7, invoke, this, function(pos) {
+				points.push(new Particle({ pos: pos, invMass: this.invMass }));
 			});
 
 			this.shape = (new Shape({ centerPoint: this, points: points,
@@ -1983,14 +1985,10 @@
 			this.limit = (limit || 10);
 		}
 		$.extend(Collider.prototype, {
-			check: function(entity, callbacks) {
+			check: function(entity, callback, args) {
 				var treeItem = entity.treeItem(),
 					neighbours = this.entityTree.get(treeItem),
-					collisions = [], c = 0;
-
-				callbacks = ((callbacks)?
-						(($.isArray(callbacks))? callbacks : [callbacks])
-					:	[]);
+					collisions = [];
 				
 				for(var n = 0; n < neighbours.length; ++n) {
 					var neighbour = neighbours[n];
@@ -1998,8 +1996,10 @@
 					if(neighbour.intersects(treeItem)) {
 						collisions.push(neighbour.item);
 						// TODO: narrow-phase collision
-						for(c = 0; c < callbacks.length; ++c) {
-							callbacks[c].call(this, neighbour.item);
+						if(callback) {
+							callback.apply(null,
+								Array.prototype.slice.call(arguments, 2)
+									.concat(neighbour.item));
 						}
 					}
 				}
@@ -2007,29 +2007,15 @@
 				if(!this.environment.boundRect.intersects(treeItem) ||
 				!this.environment.boundRect.contains(treeItem)) {
 					collisions.push(this.environment);
-					for(c = 0; c < callbacks.length; ++c) {
-						callbacks[c].call(this, this.environment);
+					
+					if(callback) {
+						callback.apply(null,
+							Array.prototype.slice.call(arguments, 2)
+								.concat(this.environment));
 					}
 				}
 
 				return collisions;
-			},
-			resolve: function(entity) {
-				for(var checks = 0; checks < this.limit; ++checks) {
-					// TODO: resolve the collision
-					this.check(entity, this.resolve);
-				}
-				/*
-				recursive version - jsperf says it's slower:
-				var checks = (checks || 0),
-					check = this.check(entity);
-				if((check.length) {
-					for(var c = 0; c < check.length; ++c) {
-						// resolve the entity collision
-					}
-					if(++checks < this.limit) { this.resolve(entity); }
-				}
-				else { return false; } */
 			}
 		});
 	// }
@@ -2090,14 +2076,14 @@
 			//this.persistor = new Persistor();
 			//this.networker = new Networker();
 
-			this.controller.events.move.watch(this.player.move, this.player);
-			this.controller.events.aim.watch(this.player.aim, this.player);
-			this.controller.events.attack.watch(this.player.attack, this.player);
-			this.controller.events.beam.watch(this.player.beam, this.player);
-			this.controller.events.repel.watch(this.player.repel, this.player);
-			this.controller.events.range.watch(this.player.range, this.player);
+			this.controller.events.move.watch(invoke, this.player, this.player.move);
+			this.controller.events.aim.watch(invoke, this.player, this.player.aim);
+			this.controller.events.attack.watch(invoke, this.player, this.player.attack);
+			this.controller.events.beam.watch(invoke, this.player, this.player.beam);
+			this.controller.events.repel.watch(invoke, this.player, this.player.repel);
+			this.controller.events.range.watch(invoke, this.player, this.player.range);
 
-			this.controller.events.pause.watch(this.pause, this);
+			this.controller.events.pause.watch(invoke, this, this.pause);
 			
 			/* If rendering is to be done asynchronously, a render tree
 				should be maintained for each render, while updates may
@@ -2139,11 +2125,8 @@
 					for(var r = 0; r < this.entities.length; ++r) {
 						var entity = this.entities[r].resolve(dt);
 						
-						collisions = this.collider.check(entity, function(collision) {
-							if(collision === lumens) {
-								lumens.clampToRange(entity);
-							}
-						});
+						collisions = this.collider.check(entity,
+							invoke, this, this.clampToRange, entity);
 
 						var treeItem = entity.treeItem();
 						
@@ -2212,14 +2195,12 @@
 				context.fillRect(0, 0, this.boundRect.size.x, this.boundRect.size.y);
 				context.restore();
 			},
-			pause: function(paused, lumens) {
-				lumens = (lumens || this);
-
-				if(lumens.state != Lumens.states.fin) {
-					lumens.state = Lumens.states[((paused)? 'paused' : 'running')];
+			pause: function(paused) {
+				if(this.state != Lumens.states.fin) {
+					this.state = Lumens.states[((paused)? 'paused' : 'running')];
 				}
 
-				return lumens;
+				return this;
 			},
 			addPredator: function() {
 				var angle = Math.random()*2*Math.PI,
@@ -2253,19 +2234,20 @@
 				
 				return this;
 			},
-			// Test - TODO: remove this
-			clampToRange: function(entity) {
-				while(entity.pos.x < 0) { entity.pos.x += this.boundRect.size.x; }
-				while(entity.pos.x > this.boundRect.size.x) {
-					entity.pos.x -= this.boundRect.size.x;
-				}
-				
-				while(entity.pos.y < 0) { entity.pos.y += this.boundRect.size.y; }
-				while(entity.pos.y > this.boundRect.size.y) {
-					entity.pos.y -= this.boundRect.size.y;
-				}
 
-				return this;
+			// Test - TODO: remove this
+			clampToRange: function(entity, other) {
+				if(other === this) {
+					while(entity.pos.x < 0) { entity.pos.x += this.boundRect.size.x; }
+					while(entity.pos.x > this.boundRect.size.x) {
+						entity.pos.x -= this.boundRect.size.x;
+					}
+					
+					while(entity.pos.y < 0) { entity.pos.y += this.boundRect.size.y; }
+					while(entity.pos.y > this.boundRect.size.y) {
+						entity.pos.y -= this.boundRect.size.y;
+					}
+				}
 			}
 		});
 		$.extend(Lumens, {
