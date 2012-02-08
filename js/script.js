@@ -738,7 +738,8 @@
 		});
 
 
-		var Influence = {
+		var Force = {
+			/* See Game Physics Engine Development, by Ian Millington */
 			// { Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target) }
 			spring: function(options) {
 				var force = options.posTo.sub(options.posFrom),
@@ -861,6 +862,84 @@
 				}
 				
 				return swarmForce;
+			}
+		};
+
+
+		Impulse = {
+			/* See Game Physics Engine Development, by Ian Millington */
+			/* { Number dt, Vec2D normal, Number restitution, Particle point1, Particle point2 o } */
+			collision: function(options) {
+				var impulse = new Vec2D();
+
+				if(options.restitution) {
+					var relVel = options.point1.vel.copy();
+
+					if(options.point2) { relVel.doSub(options.point2.vel); }
+
+					var sepVel = relVel.dot(options.normal);
+
+					if(sepVel <= 0) {
+						var closeVel = -sepVel*options.restitution,
+							relAcc = options.point1.acc.copy();
+
+						if(options.point2) { relAcc.doSub(options.point2.acc); }
+
+						var accSepVel = relAcc.dot(options.normal)*options.dt;
+
+						if(accSepVel < 0) {
+							closeVel = Math.max(closeVel+accSepVel*
+								options.restitution, 0);
+						}
+
+						var deltaVel = closeVel-sepVel,
+							totalInvMass = options.point1.invMass;
+
+						if(options.point2) {
+							totalInvMass += options.point2.invMass;
+						}
+
+						if(totalInvMass > 0) {
+							impulse = options.normal.scale(deltaVel/totalInvMass);
+
+							var point1Impulse =
+								impulse.scale(options.point1.invMass);
+
+							return ((options.point2)?
+									[point1Impulse,
+										impulse.scale(-options.point2.invMass)]
+								:	point1Impulse);
+						}
+					}
+				}
+
+				return ((options.point2)? [impulse, impulse] : impulse);
+			}
+		};
+
+
+		Move = {
+			/* { Vec2D normal, Number penetration, Particle point1, Particle point2 o } */
+			penetration: function(options) {
+				var move = new Vec2D();
+
+				if(options.penetration > 0) {
+					var totalInvMass = options.point1.invMass;
+
+					if(options.point2) { totalInvMass += options.point2.invMass; }
+
+					if(totalInvMass > 0) {
+						move = options.normal.scale(options.penetration/totalInvMass);
+
+						var point1Move = move.scale(options.point1.invMass);
+
+						return ((options.point2)?
+								[point1Move, move.scale(-options.point2.invMass)]
+							:	point1Move);
+					}
+				}
+
+				return ((options.point2)? [move, move] : move);
 			}
 		};
 
@@ -1019,15 +1098,15 @@
 				update: function() {
 					for(var e = 0; e < this.edges.length; ++e) {
 						var edge = this.edges[e];
-						edge.pointFrom.force.doAdd(Influence.spring(edge));
+						edge.pointFrom.force.doAdd(Force.spring(edge));
 					}
 
 					for(var t = 0; t < this.ties.length; ++t) {
 						var tie = this.ties[t];
-						tie.pointFrom.force.doAdd(Influence.spring(tie));
+						tie.pointFrom.force.doAdd(Force.spring(tie));
 					}
 
-					Influence.applyPressure(this.points, this.pressureFactor);
+					Force.applyPressure(this.points, this.pressureFactor);
 
 					return this;
 				},
@@ -1275,12 +1354,12 @@
 			/* TODO: change to Body */
 			Entity.call(this, Particle, options);
 
-			this.wanderInfluence = $.extend({ range: 0.6, minSpeed: 0.01,
-				vel: new Vec2D(), weight: 1 }, options.wanderInfluence);
+			this.wanderForce = $.extend({ range: 0.6, minSpeed: 0.01,
+				vel: new Vec2D(), weight: 1 }, options.wanderForce);
 			
-			this.swarmInfluence = $.extend({ swarm: null, member: this, predict: 0,
-				neighbourRad: 90, weight: null }, options.swarmInfluence);
-			this.swarmInfluence.weight = $.extend({ separation: 0.401,
+			this.swarmForce = $.extend({ swarm: null, member: this, predict: 0,
+				neighbourRad: 90, weight: null }, options.swarmForce);
+			this.swarmForce.weight = $.extend({ separation: 0.401,
 				cohesion: 0.021, alignment: 1.001 });
 			
 			/* Set up the shape */
@@ -1302,23 +1381,23 @@
 				case Predator.states.passive: case Predator.states.aggressive:
 				case Predator.states.normal:
 					if(this.vel.magSq()) {
-						this.wanderInfluence.vel.copy(this.vel.unit()
-							.doScale(this.wanderInfluence.minSpeed));
+						this.wanderForce.vel.copy(this.vel.unit()
+							.doScale(this.wanderForce.minSpeed));
 					}
 					else {
 						var angle = Math.random()*2*Math.PI;
-						this.wanderInfluence.vel.copy(new Vec2D(Math.cos(angle),
-							Math.sin(angle))).doScale(this.wanderInfluence.minSpeed);
+						this.wanderForce.vel.copy(new Vec2D(Math.cos(angle),
+							Math.sin(angle))).doScale(this.wanderForce.minSpeed);
 					}
 
-					var swarmWeight = this.swarmInfluence.weight,
+					var swarmWeight = this.swarmForce.weight,
 						swarmWeights = swarmWeight.separation+swarmWeight.cohesion+
 							swarmWeight.alignment,
-						wanderWeight = this.wanderInfluence.weight,
+						wanderWeight = this.wanderForce.weight,
 						sumWeights = wanderWeight+swarmWeights,
 
-						swarm = Influence.swarm(this.swarmInfluence),
-						wander = Influence.wander(this.wanderInfluence)
+						swarm = Force.swarm(this.swarmForce),
+						wander = Force.wander(this.wanderForce)
 							.doScale(wanderWeight);
 					
 					this.force.doAdd(swarm
@@ -1385,31 +1464,31 @@
 
 			function setWeight(weight, influence) {
 				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].swarmInfluence.weight[influence] = weight;
+					lumens.swarm[p].swarmForce.weight[influence] = weight;
 				}
 			}
 
-			AIFolder.add(predSett.options.swarmInfluence.weight, "separation",
+			AIFolder.add(predSett.options.swarmForce.weight, "separation",
 			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "separation");
 			});
-			AIFolder.add(predSett.options.swarmInfluence.weight, "cohesion",
+			AIFolder.add(predSett.options.swarmForce.weight, "cohesion",
 			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "cohesion");
 			});
-			AIFolder.add(predSett.options.swarmInfluence.weight, "alignment",
+			AIFolder.add(predSett.options.swarmForce.weight, "alignment",
 			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "alignment");
 			});
 
-			AIFolder.add(predSett.options.swarmInfluence, "predict",
+			AIFolder.add(predSett.options.swarmForce, "predict",
 			0, 5).step(0.001).listen().onChange(function(predict) {
 				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].swarmInfluence.predict = predict;
+					lumens.swarm[p].swarmForce.predict = predict;
 				}
 			});
 
-			var wander = predSett.options.wanderInfluence,
+			var wander = predSett.options.wanderForce,
 				wanderSettings = { wander: wander.weight, minSpeed: wander.minSpeed };
 
 			AIFolder.add(wanderSettings, "wander", 0, 10).step(0.001)
@@ -1417,7 +1496,7 @@
 				wander.weight = weight;
 
 				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].wanderInfluence.weight = weight;
+					lumens.swarm[p].wanderForce.weight = weight;
 				}
 			});
 			AIFolder.add(wanderSettings, "minSpeed", 0, 10).step(0.001)
@@ -1425,14 +1504,14 @@
 				wander.minSpeed = speed;
 
 				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].wanderInfluence.minSpeed = speed;
+					lumens.swarm[p].wanderForce.minSpeed = speed;
 				}
 			});
 			
-			AIFolder.add(predSett.options.swarmInfluence, "neighbourRad", 0, 1000)
+			AIFolder.add(predSett.options.swarmForce, "neighbourRad", 0, 1000)
 			.step(0.05).listen().onChange(function(rad) {
 				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].swarmInfluence.neighbourRad = rad;
+					lumens.swarm[p].swarmForce.neighbourRad = rad;
 				}
 			});
 			
@@ -1447,8 +1526,8 @@
 				viewportFolder.add(lumens.viewport.settings, s);
 			}
 
-			viewportFolder.add(lumens.viewport.springInfluence, "damping", 0, 1);
-			viewportFolder.add(lumens.viewport.springInfluence, "factor", 0, 1);
+			viewportFolder.add(lumens.viewport.springForce, "damping", 0, 1);
+			viewportFolder.add(lumens.viewport.springForce, "factor", 0, 1);
 			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1);
 
 			environmentFolder.add(lumens.boundRect.size, "x").listen();
@@ -1485,8 +1564,12 @@
 			this.canvas = this.$canvas[0];
 			this.context = this.canvas.getContext('2d');
 
-			this.springInfluence = $.extend({ pointFrom: null, posTo: null,
-				factor: 0.004, restLength: 0, damping: 0.7 }, options.springInfluence);
+			this.springForce = $.extend({ pointFrom: null, posTo: null,
+				factor: 0.004, restLength: 0, damping: 0.7 }, options.springForce);
+
+			this.restitution = (options.restitution || 0.9);
+			this.resolveLimit = (options.resolveLimit || 3);
+			this.resolves = 0;
 
 			// Setup size and shapeTree
 			this.resolve();
@@ -1535,48 +1618,89 @@
 				return this;
 			},
 			resolve: function(dt) {
-				Particle.prototype.resolve.call(this, dt);
+				if(this.resolves++ < this.resolveLimit) {
+					Particle.prototype.resolve.call(this, dt);
 
-				this.reposition();
-				this.collisions(invoke, this, this.resolveCollision);
+					this.reposition();
+					this.collisions(dt, invoke, this, this.resolveCollision);
+				}
 
 				return this;
 			},
-			collisions: function(callback, args) {
+			collisions: function(dt, callback, args) {
 				var collisions = [];
 				
 				if(this.environment) {
 					if(!this.environment.boundRect.contains(this.boundRect)) {
-						collisions.push(this.environment);
-						
-						if(callback) {
-							callback.apply(null,
-								Array.prototype.slice.call(arguments, 1)
-									.concat(this.environment));
+						var b = this.boundRect,
+							e = this.environment.boundRect.size,
+							
+							normal = new Vec2D(Math.max(-b.pos.x, 0)+
+									Math.min(e.x-(b.pos.x+b.size.x), 0),
+								Math.max(-b.pos.y, 0)+
+									Math.min(e.y-(b.pos.y+b.size.y), 0)),
+
+							penetration = normal.mag();
+
+						if(penetration) {
+							var collision = {
+									object: this.environment,
+									normal: normal.doUnit(),
+									penetration: penetration,
+									/* TODO: set this to be the time passed since
+										the time of the collision */
+									dt: dt
+								};
+
+							collisions.push(collision);
+							
+							if(callback) {
+								callback.apply(null,
+									Array.prototype.slice.call(arguments, 2)
+										.concat(collision));
+							}
 						}
 					}
 				}
 
 				return collisions;
 			},
-			resolveCollision: function(environment) {
+			resolveCollision: function(collision) {
+				this.vel.doAdd(Impulse.collision({
+					dt: collision.dt, normal: collision.normal,
+					restitution: this.restitution, point1: this
+				}));
+				this.pos.doAdd(Move.penetration({ normal: collision.normal,
+					penetration: collision.penetration, point1: this
+				}));
+
+				this.resolve(collision.dt);
+
+				return this;
+			},
+			update: function() {
 				var size = this.boundRect.size,
-					envSize = this.environment.boundRect.size;
+					from = new Particle(this),
+					to = this.springForce.posTo;
+				
+				from.pos = this.pos.add(this.minRect.size.scale(0.5));
+				this.springForce.pointFrom = from;
+				
+				if(this.environment) {
+					var envSize = this.environment.boundRect.size,
+						center = envSize.scale(0.5);
 
-				if(size.x < envSize.x && size.y < envSize.y) {
-					/* Resolve as normal - do not exceed environment bounds
-						Maybe soft collision - press in then settle back? */
-				}
-				else {
-					if(size.x >= envSize.x) {
-						this.pos.x = (envSize.x-this.minRect.size.x)/2;
-					}
-					if(size.y >= envSize.y) {
-						this.pos.y = (envSize.y-this.minRect.size.y)/2;
-					}
+					this.springForce.posTo =
+						new Vec2D(((size.x >= envSize.x)? center.x : to.x),
+							((size.y >= envSize.y)? center.y : to.y));
 				}
 
-				return this.reposition();
+				this.force.doAdd(Force.dampedSpring(this.springForce));
+				this.springForce.posTo = to;
+
+				this.resolves = 0;
+
+				return this;
 			},
 			setup: function() {
 				this.canvas.width = this.boundRect.size.x*this.zoomFactor;
@@ -1655,20 +1779,6 @@
 				this.shapes.length = this.lights.length = this.glows.length = 0;
 				if(this.shapeTree) { this.shapeTree.clear(); }
 				
-				return this;
-			},
-			update: function() {
-				var size = this.boundRect.size,
-					envSize = this.environment.boundRect.size;
-
-				if(!this.environment || size.x < envSize.x || size.y < envSize.y) {
-					var from = new Particle(this);
-					
-					from.pos = this.pos.add(this.minRect.size.scale(0.5));
-					this.springInfluence.pointFrom = from;
-					this.force.doAdd(Influence.dampedSpring(this.springInfluence));
-				}
-
 				return this;
 			},
 			renderDebug: function() {
@@ -1811,7 +1921,7 @@
 					var ctrl = event.data.ctrl,
 						e = event.originalEvent,
 						wheel = 1+(($.isNumeric(e.wheelDelta))?
-							e.wheelDelta : -e.detail*40)*0.001;
+							e.wheelDelta : -e.detail*40)*0.0006;
 
 					ctrl.lumens.viewport.zoomFactor *= wheel;
 				},
@@ -2070,7 +2180,7 @@
 				size: Lumens.minSize.copy(),
 				viewport: {
 					mass: 200, size: Lumens.minSize.copy(), environment: this,
-					springInfluence: {}
+					springForce: {}
 				},
 				player: { mass: 10, light: { rad: 100 } },
 				// for testing - don't want to set it this way permanently
@@ -2078,11 +2188,11 @@
 					num: 300,
 					options: {
 						mass: 8,
-						swarmInfluence: {
+						swarmForce: {
 							swarm: null, neighbourRad: 90, predict: 0.6,
 							weight: { separation: 0.004, cohesion: 0.0002, alignment: 0.01 }
 						},
-						wanderInfluence: { range: 0.6, minSpeed: 0.8, weight: 3.501 },
+						wanderForce: { range: 0.6, minSpeed: 0.8, weight: 3.501 },
 						maxForce: 0.006
 					}
 				}
@@ -2097,7 +2207,7 @@
 			this.entityTree = new QuadTree(this.boundRect.copy(), 5, 8);
 			this.swarmTree = new QuadTree(this.boundRect.copy(), 5, 8);
 
-			this.settings.predators.options.swarmInfluence.swarm = this.swarmTree;
+			this.settings.predators.options.swarmForce.swarm = this.swarmTree;
 			
 			for(var p = 0; p < this.settings.predators.num; ++p) {
 				this.addPredator();
@@ -2107,7 +2217,7 @@
 			this.player = new Firefly(this.settings.player);
 			this.entities.push(this.player);
 
-			this.settings.viewport.springInfluence.posTo = this.player.pos;
+			this.settings.viewport.springForce.posTo = this.player.pos;
 			this.viewport = new Viewport(this.settings.viewport);
 
 			this.controller = Controller.make(this);
@@ -2190,6 +2300,7 @@
 					
 					this.viewport.update();
 				}
+				else { this.viewport.reposition(); }
 
 				/* Render */
 				/* Should be done asynchronously, through web workers:
