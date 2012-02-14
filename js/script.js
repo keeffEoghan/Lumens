@@ -11,11 +11,9 @@
 
 		/* Adapted from John Resig's instanceOf - http://ejohn.org/blog/objectgetprototypeof/ */
 		function instance(object, Class) {
-			var prototype = Object.getPrototypeOf(object);
-
-			while(prototype) {
+			for(var prototype = Object.getPrototypeOf(object); prototype;
+				prototype = Object.getPrototypeOf(prototype)) {
 				if(prototype === Class.prototype) { return true; }
-				else { prototype = Object.getPrototypeOf(prototype); }
 			}
 
 			return false;
@@ -26,6 +24,7 @@
 			a whole load of arguments, having throw clauses, etc) */
 		function inherit(Child, Parent) {
 			Child.prototype = Object.create(Parent.prototype);
+			Child.prototype.constructor = Child;
 			return Child;
 		}
 
@@ -118,7 +117,7 @@
 			},
 
 			pinToRange: function(min, max) {
-				return this.copy().doLimitToRange(min, max);
+				return this.copy().doPinToRange(min, max);
 			},
 			
 			mag: function() { return Math.sqrt(this.magSq()); },
@@ -336,34 +335,56 @@
 					if($.isArray(item)) {
 						for(var i = 0; i < item.length; ++i) { this.add(item[i]); }
 					}
-					else if(this.nodes.length) { this.node(item).add(item); }
-					else {
-						this.kids.push(item);
-
-						if(this.depth < this.maxDepth &&
-							this.kids.length > this.maxKids) {
-							this.split().add(this.kids);
-
-							this.kids.length = 0;
-						}
+					else if(this.nodes.length) {
+						var node = this.nodesFor(item)[0];
+						
+						if(node) { node.add(item); }
+					}
+					else if(this.kids.push(item) > this.maxKids &&
+						this.depth < this.maxDepth) {
+						this.split().add(this.kids);
+						this.kids.length = 0;
 					}
 				}
 				
 				return this;
 			},
 			get: function(item) {
+				var kids = [];
+				
 				if($.isArray(item)) {
-					var kids = [];
+					// May duplicate kids
 					for(var i = 0; i < item.length; ++i) {
 						kids = kids.concat(this.get(item[i]));
 					}
-					return kids;
 				}
-				else {
-					return ((this.nodes.length)?
-						this.node(item).get(item) : this.kids);
+				else if(this.nodes.length) {
+					var nodes = this.nodesFor(item);
+
+					for(var n = 0; n < nodes.length; ++n) {
+						kids = kids.concat(nodes[n].get(item));
+					}
 				}
+				else { kids = kids.concat(this.kids); }
+				
+				return kids;
 			},
+			nodesFor: function(item) {
+				var nodes = [];
+
+				if(!item.size) { item.size = new Vec2D(); }
+
+				for(var n = 0; n < this.nodes.length; ++n) {
+					var node = this.nodes[n];
+					if(node.boundRect.contains(item)) {
+						nodes.push(node);
+						break;
+					}
+					else if(node.boundRect.intersects(item)) { nodes.push(node); }
+				}
+
+				return nodes;
+			},/*
 			node: function(item) {
 				var lR = ((item.pos.x <= this.boundRect.pos.x+this.boundRect.size.x/2)?
 						"Left" : "Right"),
@@ -371,7 +392,7 @@
 						"top" : "bottom");
 
 				return this.nodes[Node.corners[tB+lR]];
-			},
+			},*/
 			split: function() {
 				var depth = this.depth+1,
 					
@@ -425,19 +446,15 @@
 						for(var i = 0; i < item.length; ++i) { this.add(item[i]); }
 					}
 					else if(this.nodes.length) {
-						var nodes = this.node(item);
+						var nodes = this.nodesFor(item);
 						
-						if(nodes.length === 1) { nodes[0].add(item); }
-						else { this.borderKids.push(item); }
+						if(nodes.length > 1) { this.borderKids.push(item); }
+						else if(nodes.length) { nodes[0].add(item); }
 					}
-					else {
-						this.kids.push(item);
-						
-						if(this.depth < this.maxDepth &&
-							this.kids.length > this.maxKids) {
-							this.split().add(this.kids);
-							this.kids.length = 0;
-						}
+					else if(this.kids.push(item) > this.maxKids &&
+						this.depth < this.maxDepth) {
+						this.split().add(this.kids);
+						this.kids.length = 0;
 					}
 				}
 				
@@ -447,35 +464,25 @@
 				var kids = [];
 				
 				if($.isArray(item)) {
+					// May duplicate kids
 					for(var i = 0; i < item.length; ++i) {
 						kids = kids.concat(this.get(item[i]));
 					}
 				}
-				else if(this.nodes.length) {
-					var nodes = this.node(item);
+				else {
+					if(this.nodes.length) {
+						var nodes = this.nodesFor(item);
 
-					for(var n = 0; n < nodes.length; ++n) {
-						kids = kids.concat(nodes[n].get(item));
+						for(var n = 0; n < nodes.length; ++n) {
+							kids = kids.concat(nodes[n].get(item));
+						}
 					}
+					else { kids = kids.concat(this.kids); }
+
+					kids = kids.concat(this.borderKids);
 				}
-				else { kids = kids.concat(this.kids); }
 				
-				return kids.concat(this.borderKids);
-			},
-			/* NOTE: for bounds nodes, this returns an array of nodes for any
-				intersecting the item, not a single node */
-			node: function(item) {
-				var nodes = [];
-				for(var n = 0; n < this.nodes.length; ++n) {
-					var node = this.nodes[n];
-					if(node.boundRect.contains(item)) {
-						nodes.push(node);
-						break;
-					}
-					else if(node.boundRect.intersects(item)) { nodes.push(node); }
-				}
-
-				return nodes;
+				return kids;
 			},
 			clear: function() {
 				this.borderKids.length = 0;
@@ -1251,6 +1258,8 @@
 
 			this.maxForce = (options.maxForce || 0.03);
 			this.maxTorque = (options.maxTorque || 1.0);
+
+			this.restitution = (options.restitution || 0.2);
 		}
 		$.extend(Entity.prototype, {
 			update: function() {
@@ -1259,7 +1268,7 @@
 				return this;
 			},
 			resolve: function(dt) {
-				if(dt/* && this.resolves++ < this.resolveLimit*/) {
+				if(dt) {
 					this.Type.prototype.resolve.call(this, dt);
 					this.shape.resolve(dt);
 				}
@@ -1294,7 +1303,7 @@
 					}
 				}
 
-				if(!environment.boundRect.intersects(treeItem)) {
+				if(!environment.boundRect.contains(treeItem)) {
 					var envCollision = environment.collision(dt, treeItem);
 
 					if(envCollision) {
@@ -1318,13 +1327,17 @@
 					//  TODO: narrow collision detection
 					var normal = shape.centerPoint.pos
 							.sub(otherShape.centerPoint.pos),
-						penetration = (shape.boundRad.rad+otherShape.boundRad.rad)-
-							normal.mag();
+						norMag = normal.mag(),
+						penetration =
+							(shape.boundRad.rad+otherShape.boundRad.rad)-norMag;
 
-					if(penetration > 0) {
+					if(!norMag) {
+						log("Entity Collision Warning: entities have the same center", this, other);
+					}
+					else if(penetration > 0) {
 						collision = {
 							object: other,
-							normal: normal.doUnit(),
+							normal: normal.doScale(1/norMag),
 							penetration: penetration,
 							/* TODO: set this to be the time passed since
 								the time of the collision */
@@ -1349,14 +1362,15 @@
 					this.resolve(collision.dt);
 				}
 				else if(instance(collision.object, Entity)) {
-					log("Entity entity collision");
 					var impulses = Impulse.collision({
 							dt: collision.dt, normal: collision.normal,
-							restitution: this.restitution, point1: this
+							restitution: this.restitution,
+							point1: this, point2: collision.object
 						}),
 						moves = Move.penetration({
 							normal: collision.normal,
-							penetration: collision.penetration, point1: this
+							penetration: collision.penetration,
+							point1: this, point2: collision.object
 						});
 
 					this.vel.doAdd(impulses[0]);
@@ -1376,9 +1390,14 @@
 			function EntityTemplate() {}
 
 			inherit(EntityTemplate, Entity);
-			EntityTemplate.prototype = $.extend(!!deep, EntityTemplate.prototype,
-				Type.prototype, Entity.prototype);
 			
+			var typeInheritance = [EntityTemplate.prototype,
+				Type.prototype, Entity.prototype];
+
+			if(deep) { typeInheritance.unshift(deep); }
+
+			$.extend.apply($, typeInheritance);
+
 			return EntityTemplate;
 		};
 		Entity.states = new Enum("spawn", "normal", "dead");
@@ -1512,6 +1531,10 @@
 		Predator.states = $.extend({}, Entity.states,
 			new Enum("passive", "aggressive", "feeding", "stunned"));
 	// }
+
+	// ENVIRONMENT {
+		
+	//}
 	
 	// DEBUG {
 		/* GUI for testing */
@@ -1745,19 +1768,20 @@
 				return collisions;
 			},
 			resolveCollision: function(collision) {
-				this.vel.doAdd(Impulse.collision({
+				/*this.vel.doAdd(Impulse.collision({
 					dt: collision.dt, normal: collision.normal,
 					restitution: this.restitution, point1: this
-				}));
-				/*this.pos.doAdd(Move.penetration({ normal: collision.normal,
-					penetration: collision.penetration, point1: this
 				}));*/
+				this.pos.doAdd(Move.penetration({ normal: collision.normal,
+					penetration: collision.penetration, point1: this
+				}));
+				this.reposition();
 
-				if(this.resolves++ < this.resolveLimit) {
+				/*if(this.resolves++ < this.resolveLimit) {
 					this.resolve(collision.dt)
 						.collisions(collision.dt,
 							invoke, this, this.resolveCollision);
-				}
+				}*/
 
 				return this;
 			},
@@ -2301,7 +2325,7 @@
 			
 			this.settings.player.pos = this.boundRect.size.scale(0.5);
 			this.player = new Firefly(this.settings.player);
-			this.entities.push(this.player);
+			this.entities.unshift(this.player);
 
 			this.settings.viewport.springForce.posTo = this.player.pos;
 			this.viewport = new Viewport(this.settings.viewport);
@@ -2351,13 +2375,14 @@
 				
 				this.time = currentTime;
 
-				this.viewport.resize();
+				this.viewport.resize().resolve(dt)
+					.collisions(dt, invoke, this.viewport,
+						this.viewport.resolveCollision);
+
+				this.viewport.update();
+
 
 				if(this.state === Lumens.states.running) {
-					this.viewport.resolve(dt)
-						.collisions(dt, invoke, this.viewport,
-							this.viewport.resolveCollision);
-
 					/* Clear the Quadtrees */
 					this.entityTree.clear();
 					this.swarmTree.clear();
@@ -2385,10 +2410,7 @@
 					for(var u = 0; u < this.entities.length; ++u) {
 						this.entities[u].update(dt);
 					}
-					
-					this.viewport.update();
 				}
-				else { this.viewport.reposition(); }
 
 				/* Render */
 				/* Should be done asynchronously, through web workers:
@@ -2477,17 +2499,22 @@
 			},
 			collision: function(dt, rect) {
 				var collision = null, s = this.boundRect.size,
-					
-					normal = new Vec2D(Math.max(-rect.pos.x, 0)+
-							Math.min(s.x-(rect.pos.x+rect.size.x), 0),
-						Math.max(-rect.pos.y, 0)+
-							Math.min(s.y-(rect.pos.y+rect.size.y), 0)),
+
+					/* In the case that the rect is larger than this boundRect,
+						it should be centered */
+					margin = new Vec2D(Math.max((rect.size.x-s.x)/2, 0),
+						Math.max((rect.size.y-s.y)/2, 0)),
+
+					normal = new Vec2D(Math.max(-rect.pos.x, margin.x)+
+							Math.min(s.x-(rect.pos.x+rect.size.x), -margin.x),
+						Math.max(-rect.pos.y, margin.y)+
+							Math.min(s.y-(rect.pos.y+rect.size.y), -margin.y)),
 
 					penetration = normal.mag();
 
 				if(penetration) {
 					collision = {
-						object: this, normal: normal.doUnit(),
+						object: this, normal: normal.doScale(1/penetration),
 						penetration: penetration,
 						/* TODO: set this to be the time passed since
 							the time of the collision */
@@ -2497,19 +2524,15 @@
 
 				return collision;
 			},
-
-			// Test - TODO: remove this
-			clampToRange: function(entity, other) {
-				if(other === this) {
-					while(entity.pos.x < 0) { entity.pos.x += this.boundRect.size.x; }
-					while(entity.pos.x > this.boundRect.size.x) {
-						entity.pos.x -= this.boundRect.size.x;
-					}
-					
-					while(entity.pos.y < 0) { entity.pos.y += this.boundRect.size.y; }
-					while(entity.pos.y > this.boundRect.size.y) {
-						entity.pos.y -= this.boundRect.size.y;
-					}
+			wrap: function(entity) {
+				while(entity.pos.x < 0) { entity.pos.x += this.boundRect.size.x; }
+				while(entity.pos.x > this.boundRect.size.x) {
+					entity.pos.x -= this.boundRect.size.x;
+				}
+				
+				while(entity.pos.y < 0) { entity.pos.y += this.boundRect.size.y; }
+				while(entity.pos.y > this.boundRect.size.y) {
+					entity.pos.y -= this.boundRect.size.y;
 				}
 			}
 		});

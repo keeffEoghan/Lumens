@@ -26,10 +26,22 @@ if(!window.requestAnimationFrame) {
 		return Math.max(Math.min(value, max), min);
 	};
 
-	Array.prototype.wrap = function(i) {
-		var offset = i%this.length;
-		return this[((offset < 0)? offset+this.length : offset)];
-	};
+	$.extend(Array.prototype, {
+		wrap: function(i) {
+			var offset = i%this.length;
+			return this[((offset < 0)? offset+this.length : offset)];
+		},
+		unique: function() {
+			for(var i = 0; i < this.length; ++i) {
+				for(var element = this[i], d = this.lastIndexOf(element);
+					i !== d; d = this.lastIndexOf(element)) {
+					this.splice(d, 1);
+				}
+			}
+
+			return this;
+		}
+	});
 	
 	$.extend({
 		/* Normalises vendor-specific CSS properties
