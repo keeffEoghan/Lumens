@@ -5,8 +5,28 @@
 		/* Static wrapper for apply
 			Maintains the this value no matter how many times it's passed around
 			Useful for callbacks */
-		function invoke(obj, func, args) {
-			func.apply(obj, Array.prototype.slice.call(arguments, 2));
+		function invoke(object, func, args) {
+			func.apply(object, Array.prototype.slice.call(arguments, 2));
+		}
+
+		/* Adapted from John Resig's instanceOf - http://ejohn.org/blog/objectgetprototypeof/ */
+		function instance(object, Class) {
+			var prototype = Object.getPrototypeOf(object);
+
+			while(prototype) {
+				if(prototype === Class.prototype) { return true; }
+				else { prototype = Object.getPrototypeOf(prototype); }
+			}
+
+			return false;
+		}
+
+		/* Safer than inheriting from new Parent(), as Object.create
+			circumvents the constructor, which could cause problems (needing
+			a whole load of arguments, having throw clauses, etc) */
+		function inherit(Child, Parent) {
+			Child.prototype = Object.create(Parent.prototype);
+			return Child;
 		}
 
 		/* Simple observable class: subscribe/unsubscribe with id and
@@ -398,7 +418,7 @@
 			this.borderKids = [];
 		}
 		BoundsNode.corners = Node.corners;
-		$.extend(BoundsNode.prototype, Node.prototype, {
+		$.extend(inherit(BoundsNode, Node).prototype, {
 			add: function(item) {
 				if(item) {
 					if($.isArray(item)) {
@@ -692,7 +712,7 @@
 			
 			this.updateDerived();
 		}
-		$.extend(Body.prototype, Particle.prototype, {
+		$.extend(inherit(Body, Particle).prototype, {
 			resolve: function(dt) {
 				if(dt) {
 					/* Integrate for rotations */
@@ -951,7 +971,7 @@
 			Circle.call(this, (options.pos || new Vec2D()), (options.rad || 5));
 			this.color = (options.color || Color.fromRGBA(255, 255, 255, 1));
 		}
-		$.extend(Light.prototype, Circle.prototype, {
+		$.extend(inherit(Light, Circle).prototype, {
 			render: function(context) {
 				if(this.rad) {
 					context.save();
@@ -984,7 +1004,7 @@
 
 			this.target = (options.target || new Vec2D());
 		}
-		$.extend(Spotlight.prototype, Light.prototype, {
+		$.extend(inherit(Spotlight, Light).prototype, {
 			render: function(context) {
 				/* TODO: WebGL - render from pos point to circle with
 					center target and radius rad */
@@ -1094,7 +1114,7 @@
 
 				this.pressureFactor = (options.pressureFactor || 0.005);
 			}
-			$.extend(SoftShape.prototype, Shape.prototype, {
+			$.extend(inherit(SoftShape, Shape).prototype, {
 				update: function() {
 					for(var e = 0; e < this.edges.length; ++e) {
 						var edge = this.edges[e];
@@ -1203,7 +1223,7 @@
 					Note: this expects a body as centerPoint, not a particle */
 				Shape.call(this, options);
 			}
-			$.extend(BodyShape.prototype, Shape.prototype);
+			$.extend(inherit(BodyShape, Shape).prototype);
 			
 
 			function SoftBodyShape(options) {
@@ -1211,13 +1231,12 @@
 				
 				BodyShape.call(this, options);
 			}
-			$.extend(SoftBodyShape.prototype, BodyShape.prototype);
+			$.extend(inherit(SoftBodyShape, BodyShape).prototype);
 		// }
 	// }
 	
 	// ENTITIES {
-		/* Template class
-			Update function must override the one of the physical body "Type" */
+		/* Template class */
 		function Entity(Type, options) {
 			if(!options) { options = {}; }
 			
@@ -1240,7 +1259,7 @@
 				return this;
 			},
 			resolve: function(dt) {
-				if(dt) {
+				if(dt/* && this.resolves++ < this.resolveLimit*/) {
 					this.Type.prototype.resolve.call(this, dt);
 					this.shape.resolve(dt);
 				}
@@ -1252,38 +1271,116 @@
 				treeItem.item = this;
 				return treeItem;
 			},
-			collisions: function(entityTree, environment, callback, args) {
-				var treeItem = this.treeItem(),
-					neighbours = entityTree.get(treeItem),
-					collisions = [];
+			collisions: function(dt, entityTree, environment, callback, args) {
+				var collisions = [],
+					treeItem = this.treeItem(),
+					neighbours = entityTree.get(treeItem);
 				
 				for(var n = 0; n < neighbours.length; ++n) {
 					var neighbour = neighbours[n];
 
 					if(neighbour.intersects(treeItem)) {
-						collisions.push(neighbour.item);
-						// TODO: narrow-phase collision
-						if(callback) {
-							callback.apply(null,
-								Array.prototype.slice.call(arguments, 3)
-									.concat(neighbour.item));
+						var entityCollision = this.collision(dt, neighbour.item);
+						
+						if(entityCollision) {
+							collisions.push(entityCollision);
+							
+							if(callback) {
+								callback.apply(null,
+									Array.prototype.slice.call(arguments, 4)
+										.concat(entityCollision));
+							}
 						}
 					}
 				}
 
 				if(!environment.boundRect.intersects(treeItem)) {
-					collisions.push(environment);
-					
-					if(callback) {
-						callback.apply(null,
-							Array.prototype.slice.call(arguments, 3)
-								.concat(environment));
+					var envCollision = environment.collision(dt, treeItem);
+
+					if(envCollision) {
+						collisions.push(envCollision);
+						
+						if(callback) {
+							callback.apply(null,
+								Array.prototype.slice.call(arguments, 2)
+									.concat(envCollision));
+						}
 					}
 				}
 
 				return collisions;
+			},
+			collision: function(dt, other) {
+				var collision = null,
+					otherShape = other.shape, shape = this.shape;
+
+				if(otherShape.boundRad.intersects(shape.boundRad)) {
+					//  TODO: narrow collision detection
+					var normal = shape.centerPoint.pos
+							.sub(otherShape.centerPoint.pos),
+						penetration = (shape.boundRad.rad+otherShape.boundRad.rad)-
+							normal.mag();
+
+					if(penetration > 0) {
+						collision = {
+							object: other,
+							normal: normal.doUnit(),
+							penetration: penetration,
+							/* TODO: set this to be the time passed since
+								the time of the collision */
+							dt: dt
+						};
+					}
+				}
+
+				return collision;
+			},
+			resolveCollision: function(collision) {
+				if(instance(collision.object, Lumens)) {
+					this.vel.doAdd(Impulse.collision({
+						dt: collision.dt, normal: collision.normal,
+						restitution: this.restitution, point1: this
+					}));
+					this.pos.doAdd(Move.penetration({
+						normal: collision.normal,
+						penetration: collision.penetration, point1: this
+					}));
+
+					this.resolve(collision.dt);
+				}
+				else if(instance(collision.object, Entity)) {
+					log("Entity entity collision");
+					var impulses = Impulse.collision({
+							dt: collision.dt, normal: collision.normal,
+							restitution: this.restitution, point1: this
+						}),
+						moves = Move.penetration({
+							normal: collision.normal,
+							penetration: collision.penetration, point1: this
+						});
+
+					this.vel.doAdd(impulses[0]);
+					this.pos.doAdd(moves[0]);
+
+					collision.object.vel.doAdd(impulses[1]);
+					collision.object.pos.doAdd(moves[1]);
+
+					collision.object.resolve(collision.dt);
+					collision.object.resolve(collision.dt);
+				}
+
+				return this;
 			}
 		});
+		Entity.inherit = function(Type, deep) {
+			function EntityTemplate() {}
+
+			inherit(EntityTemplate, Entity);
+			EntityTemplate.prototype = $.extend(!!deep, EntityTemplate.prototype,
+				Type.prototype, Entity.prototype);
+			
+			return EntityTemplate;
+		};
 		Entity.states = new Enum("spawn", "normal", "dead");
 		
 
@@ -1313,7 +1410,7 @@
 			
 			this.inputForce = null;
 		}
-		$.extend(Firefly.prototype, Particle.prototype, Entity.prototype, {
+		$.extend(inherit(Firefly, Entity.inherit(Particle)).prototype, {
 			resolve: function(dt) {
 				if(dt) {
 					if(this.inputForce) { this.force.doAdd(this.inputForce); }
@@ -1375,7 +1472,7 @@
 			
 			this.state = Predator.states.spawn;
 		}
-		$.extend(Predator.prototype, Particle.prototype, Entity.prototype, {
+		$.extend(inherit(Predator, Entity.inherit(Particle)).prototype, {
 			update: function() {
 				switch(this.state) {
 				case Predator.states.passive: case Predator.states.aggressive:
@@ -1567,7 +1664,7 @@
 			this.springForce = $.extend({ pointFrom: null, posTo: null,
 				factor: 0.004, restLength: 0, damping: 0.7 }, options.springForce);
 
-			this.restitution = (options.restitution || 0.9);
+			this.restitution = (options.restitution || 0.75);
 			this.resolveLimit = (options.resolveLimit || 3);
 			this.resolves = 0;
 
@@ -1596,7 +1693,7 @@
 				the canvas, then the render-lists are populated, followed by a
 				call to render, which calls clear at the end */
 		}
-		$.extend(Viewport.prototype, Particle.prototype, {
+		$.extend(inherit(Viewport, Particle).prototype, {
 			resize: function() {
 				/* Fit everything to the screen in question,
 					maintaining aspect ratio */
@@ -1618,11 +1715,10 @@
 				return this;
 			},
 			resolve: function(dt) {
-				if(this.resolves++ < this.resolveLimit) {
+				if(dt) {
 					Particle.prototype.resolve.call(this, dt);
 
 					this.reposition();
-					this.collisions(dt, invoke, this, this.resolveCollision);
 				}
 
 				return this;
@@ -1632,26 +1728,9 @@
 				
 				if(this.environment) {
 					if(!this.environment.boundRect.contains(this.boundRect)) {
-						var b = this.boundRect,
-							e = this.environment.boundRect.size,
-							
-							normal = new Vec2D(Math.max(-b.pos.x, 0)+
-									Math.min(e.x-(b.pos.x+b.size.x), 0),
-								Math.max(-b.pos.y, 0)+
-									Math.min(e.y-(b.pos.y+b.size.y), 0)),
+						var collision = this.environment.collision(dt, this.boundRect);
 
-							penetration = normal.mag();
-
-						if(penetration) {
-							var collision = {
-									object: this.environment,
-									normal: normal.doUnit(),
-									penetration: penetration,
-									/* TODO: set this to be the time passed since
-										the time of the collision */
-									dt: dt
-								};
-
+						if(collision) {
 							collisions.push(collision);
 							
 							if(callback) {
@@ -1670,11 +1749,15 @@
 					dt: collision.dt, normal: collision.normal,
 					restitution: this.restitution, point1: this
 				}));
-				this.pos.doAdd(Move.penetration({ normal: collision.normal,
+				/*this.pos.doAdd(Move.penetration({ normal: collision.normal,
 					penetration: collision.penetration, point1: this
-				}));
+				}));*/
 
-				this.resolve(collision.dt);
+				if(this.resolves++ < this.resolveLimit) {
+					this.resolve(collision.dt)
+						.collisions(collision.dt,
+							invoke, this, this.resolveCollision);
+				}
 
 				return this;
 			},
@@ -1755,7 +1838,10 @@
 					var glow = this.glows[g].render(this.context);
 				}
 
-				if(this.environment) { this.environment.render(this.context); }
+				if(this.environment) {
+					this.context.globalCompositeOperation = 'destination-atop';
+					this.environment.render(this.context);
+				}
 
 				this.renderDebug();
 
@@ -1906,7 +1992,7 @@
 				Pausing the game relinquishes global listening */
 			$(document).off('.lumens').on(this.handlers, { ctrl: this });
 		}
-		$.extend(MKController.prototype, Controller.prototype, {
+		$.extend(inherit(MKController, Controller).prototype, {
 			handlers: {
 				'mousedown.lumens': function(e) { e.data.ctrl.events.attack.thing(true); },
 				'mouseup.lumens': function(e) { e.data.ctrl.events.attack.thing(false); },
@@ -2037,7 +2123,7 @@
 			this.lumens.viewport.$canvas.off('.lumens')
 				.on(this.handlers, { ctrl: this });
 		}
-		$.extend(TouchController.prototype, Controller.prototype, {
+		$.extend(inherit(TouchController, Controller).prototype, {
 			handlers: {
 				'touchstart.lumens': function(event) {
 					/* Prevents scrolling */
@@ -2268,7 +2354,9 @@
 				this.viewport.resize();
 
 				if(this.state === Lumens.states.running) {
-					this.viewport.resolve(dt);
+					this.viewport.resolve(dt)
+						.collisions(dt, invoke, this.viewport,
+							this.viewport.resolveCollision);
 
 					/* Clear the Quadtrees */
 					this.entityTree.clear();
@@ -2277,16 +2365,16 @@
 					/* Resolve everything */
 					for(var r = 0; r < this.entities.length; ++r) {
 						var entity = this.entities[r].resolve(dt);
-						
-						entity.collisions(this.entityTree, this,
-							invoke, this, this.clampToRange, entity);
+
+						entity.collisions(dt, this.entityTree, this,
+							invoke, entity, entity.resolveCollision);
 
 						var treeItem = entity.treeItem();
 						
 						/* Populate Quadtrees */
 						this.entityTree.add(treeItem);
 						
-						if(entity.constructor === Predator) {
+						if(instance(entity, Predator)) {
 							this.swarmTree.add(treeItem);
 						}
 					}
@@ -2387,6 +2475,28 @@
 				
 				return this;
 			},
+			collision: function(dt, rect) {
+				var collision = null, s = this.boundRect.size,
+					
+					normal = new Vec2D(Math.max(-rect.pos.x, 0)+
+							Math.min(s.x-(rect.pos.x+rect.size.x), 0),
+						Math.max(-rect.pos.y, 0)+
+							Math.min(s.y-(rect.pos.y+rect.size.y), 0)),
+
+					penetration = normal.mag();
+
+				if(penetration) {
+					collision = {
+						object: this, normal: normal.doUnit(),
+						penetration: penetration,
+						/* TODO: set this to be the time passed since
+							the time of the collision */
+						dt: dt
+					};
+				}
+
+				return collision;
+			},
 
 			// Test - TODO: remove this
 			clampToRange: function(entity, other) {
@@ -2423,4 +2533,6 @@
 
 		addGUI(lumens);
 	});
+
+	// TODO: Brownian motion for physics - freeze resting objects to avoid jitter
 })(jQuery);

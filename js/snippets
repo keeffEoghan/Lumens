@@ -1,0 +1,28 @@
+/* Like $.extend, first argument is the object to be extended, subsequent
+	arguments are objects which extend it
+	The first argument may also be set to true, indicating a deep extension
+	- in this case, the second object is the object to be extended */
+function extend() {
+	var first = 0, object = arguments[first], ext;
+
+	if(object === true) {
+		object = arguments[++first];
+		ext = function(extender, key) {
+			var val = extender[key];
+			if(val) {  }
+			else { object[key] = val; }
+		};
+	}
+	else { ext = function(extender, key) { object[key] = extender[key]; }; }
+
+	function each() {
+		for(var a in arguments) {
+			var extender = arguments[a];
+			for(var e in extender) { ext(extender, e); }
+		}
+	}
+
+	each.apply(null, Array.prototype.slice.call(arguments, first+1));
+
+	return object;
+}
