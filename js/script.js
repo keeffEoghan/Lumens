@@ -22,10 +22,15 @@
 		/* Safer than inheriting from new Parent(), as Object.create
 			circumvents the constructor, which could cause problems (needing
 			a whole load of arguments, having throw clauses, etc) */
-		function inherit(Child, Parent) {
-			Child.prototype = Object.create(Parent.prototype);
-			Child.prototype.constructor = Child;
-			return Child;
+		function inherit(Child, Parent, deep) {
+			var inheritance = [Child, Parent, {
+					prototype: Object.create(Parent.prototype),
+					constructor: Child
+				}];
+
+			if(deep) { inheritance.unshift(deep); }
+
+			return $.extend.apply($, inheritance);
 		}
 
 		/* Simple observable class: subscribe/unsubscribe with id and
@@ -151,7 +156,10 @@
 			
 			doMult: function(other) { this.x *= other.x; this.y *= other.y; return this; },
 			
-			doPerp: function() { var x = this.x; this.x = -this.y; this.y = x; return this; },
+			doPerp: function() {
+				// Left
+				var x = this.x; this.x = -this.y; this.y = x; return this;
+			},
 			
 			doScale: function(m) { this.x *= m; this.y *= m; return this; },
 			
@@ -306,16 +314,23 @@
 		*/
 		/* Operates on items with the structure { x, y } for Nodes
 			and { x, y, width, height } for BoundsNodes */
-		function QuadTree(boundRect, maxDepth, maxKids, kids, pointQuad) {
+		function QuadTree(boundRect, maxDepth, maxKids, source, pointQuad) {
 			this.root = ((pointQuad)?
 					new Node(boundRect, 0, maxDepth, maxKids)
 				:	new BoundsNode(boundRect, 0, maxDepth, maxKids));
 			
-			this.add(kids);
+			// Array of whatever the tree is populated from - generic, convenience
+			this.source = (source || []);
+
+			if(this.source.length) { this.put(source); }
 		}
 		$.extend(QuadTree.prototype, {
-			add: function(item) { this.root.add(item); },
-			clear: function() { return this.root.clear(); },
+			add: function(source) {
+				this.source = this.source.concat(source); return this;
+			},
+			put: function(item) { this.root.put(item); return this; },
+			clear: function() { this.root.clear(); return this; },
+			clearAll: function() { this.source.length = 0; return this.clear(); },
 			get: function(item) { return this.root.get(item).slice(0); }
 		});
 
@@ -330,19 +345,19 @@
 			this.nodes = [];
 		}
 		$.extend(Node.prototype, {
-			add: function(item) {
+			put: function(item) {
 				if(item) {
 					if($.isArray(item)) {
-						for(var i = 0; i < item.length; ++i) { this.add(item[i]); }
+						for(var i = 0; i < item.length; ++i) { this.put(item[i]); }
 					}
 					else if(this.nodes.length) {
 						var node = this.nodesFor(item)[0];
 						
-						if(node) { node.add(item); }
+						if(node) { node.put(item); }
 					}
 					else if(this.kids.push(item) > this.maxKids &&
 						this.depth < this.maxDepth) {
-						this.split().add(this.kids);
+						this.split().put(this.kids);
 						this.kids.length = 0;
 					}
 				}
@@ -440,20 +455,20 @@
 		}
 		BoundsNode.corners = Node.corners;
 		$.extend(inherit(BoundsNode, Node).prototype, {
-			add: function(item) {
+			put: function(item) {
 				if(item) {
 					if($.isArray(item)) {
-						for(var i = 0; i < item.length; ++i) { this.add(item[i]); }
+						for(var i = 0; i < item.length; ++i) { this.put(item[i]); }
 					}
 					else if(this.nodes.length) {
 						var nodes = this.nodesFor(item);
 						
 						if(nodes.length > 1) { this.borderKids.push(item); }
-						else if(nodes.length) { nodes[0].add(item); }
+						else if(nodes.length) { nodes[0].put(item); }
 					}
 					else if(this.kids.push(item) > this.maxKids &&
 						this.depth < this.maxDepth) {
-						this.split().add(this.kids);
+						this.split().put(this.kids);
 						this.kids.length = 0;
 					}
 				}
@@ -806,6 +821,7 @@
 			applyPressure: function(points, factor) {
 				// Derived used to prevent repeated calculations
 				var volume = 0, derived = [];
+
 				for(var p = 0; p < points.length; ++p) {
 					var from = points[p], to = points.wrap(p-1),
 						vec = from.pos.sub(to.pos),
@@ -1090,7 +1106,7 @@
 							this.points.length+1 : this.points.length);
 
 					context.save();
-					$.extend(context, { strokeStyle: color, fillStyle: color });
+					context.strokeStyle = context.fillStyle = color;
 					context.beginPath();
 					context.moveTo(pos.x, pos.y);
 
@@ -1105,7 +1121,12 @@
 					return this;
 				},
 				relPos: function(globPos) { return globPos.sub(this.centerPoint.pos); },
-				globPos: function(relPos) { return this.centerPoint.pos.add(relPos); }
+				globPos: function(relPos) { return this.centerPoint.pos.add(relPos); },
+				treeItem: function() {
+					var treeItem = this.boundRad.containingAARect();
+					treeItem.item = this;
+					return treeItem;
+				}
 			});
 
 			
@@ -1175,7 +1196,7 @@
 								this.points.length+1 : this.points.length);
 
 						context.save();
-						$.extend(context, { strokeStyle: color, fillStyle: color });
+						context.strokeStyle = context.fillStyle = color;
 						context.beginPath();
 						context.moveTo(pos.x, pos.y);
 
@@ -1259,11 +1280,14 @@
 			this.maxForce = (options.maxForce || 0.03);
 			this.maxTorque = (options.maxTorque || 1.0);
 
-			this.restitution = (options.restitution || 0.2);
+			this.restitution = (options.restitution || 0.4);
+			this.maxRechecks = (options.maxRechecks || 3);
+			this.rechecks = 0;
 		}
 		$.extend(Entity.prototype, {
 			update: function() {
 				this.shape.update();
+				this.rechecks = 0;
 
 				return this;
 			},
@@ -1276,43 +1300,63 @@
 				return this;
 			},
 			treeItem: function() {
-				var treeItem = this.shape.boundRad.containingAARect();
+				var treeItem = this.shape.treeItem();
 				treeItem.item = this;
 				return treeItem;
 			},
-			collisions: function(dt, entityTree, environment, callback, args) {
+			// colliders: { QuadTree entities, Lumens environment, QuadTree walls }
+			collisions: function(dt, colliders, callback, args) {
 				var collisions = [],
-					treeItem = this.treeItem(),
-					neighbours = entityTree.get(treeItem);
-				
-				for(var n = 0; n < neighbours.length; ++n) {
-					var neighbour = neighbours[n];
+					treeItem = this.treeItem();
 
-					if(neighbour.intersects(treeItem)) {
-						var entityCollision = this.collision(dt, neighbour.item);
-						
-						if(entityCollision) {
-							collisions.push(entityCollision);
+				if(colliders.entities) {
+					for(var neighbours = colliders.entities.get(treeItem), n = 0;
+						n < neighbours.length; ++n) {
+						var neighbour = neighbours[n];
+
+						if(neighbour.intersects(treeItem)) {
+							var entityCollision = this.collision(dt, neighbour.item);
 							
-							if(callback) {
-								callback.apply(null,
-									Array.prototype.slice.call(arguments, 4)
-										.concat(entityCollision));
+							if(entityCollision) {
+								collisions.push(entityCollision);
+								
+								if(callback) {
+									callback.apply(null,
+										Array.prototype.slice.call(arguments, 3)
+											.concat(entityCollision, colliders));
+								}
 							}
 						}
 					}
 				}
 
-				if(!environment.boundRect.contains(treeItem)) {
-					var envCollision = environment.collision(dt, treeItem);
+				if(colliders.environment) {
+					if(!colliders.environment.boundRect.contains(treeItem)) {
+						var envCollision = colliders.environment.collision(dt, treeItem);
 
-					if(envCollision) {
-						collisions.push(envCollision);
-						
-						if(callback) {
-							callback.apply(null,
-								Array.prototype.slice.call(arguments, 2)
-									.concat(envCollision));
+						if(envCollision) {
+							collisions.push(envCollision);
+							
+							if(callback) {
+								callback.apply(null,
+									Array.prototype.slice.call(arguments, 3)
+										.concat(envCollision, colliders));
+							}
+						}
+					}
+				}
+
+				if(colliders.walls) {
+					for(var walls = colliders.walls.get(treeItem), w = 0;
+						w < walls.length; ++w) {
+						var wall = walls[w];
+
+						if(false) {
+							for(var p = 0; p < wall.points.length; ++p) {
+								var edge = wall.points[p].pos
+										.sub(wall.points.wrap(p-1).pos),
+									normal = edge.perp();
+							}
 						}
 					}
 				}
@@ -1332,7 +1376,7 @@
 							(shape.boundRad.rad+otherShape.boundRad.rad)-norMag;
 
 					if(!norMag) {
-						log("Entity Collision Warning: entities have the same center", this, other);
+						//log("Entity Collision Warning: entities have the same center", this, other);
 					}
 					else if(penetration > 0) {
 						collision = {
@@ -1348,18 +1392,22 @@
 
 				return collision;
 			},
-			resolveCollision: function(collision) {
+			resolveCollision: function(collision, colliders) {
 				if(instance(collision.object, Lumens)) {
-					this.vel.doAdd(Impulse.collision({
-						dt: collision.dt, normal: collision.normal,
-						restitution: this.restitution, point1: this
-					}));
-					this.pos.doAdd(Move.penetration({
-						normal: collision.normal,
-						penetration: collision.penetration, point1: this
-					}));
+					if(collision.object.toroid) { this.wrap(collision.object); }
+					else {
+						this.vel.doAdd(Impulse.collision({
+							dt: collision.dt, normal: collision.normal,
+							restitution: this.restitution, point1: this
+						}));
+						this.pos.doAdd(Move.penetration({
+							normal: collision.normal,
+							penetration: collision.penetration, point1: this
+						}));
 
-					this.resolve(collision.dt);
+						this.recheckCollisions(collision.dt, colliders,
+							invoke, this, this.resolveCollision);
+					}
 				}
 				else if(instance(collision.object, Entity)) {
 					var impulses = Impulse.collision({
@@ -1379,11 +1427,29 @@
 					collision.object.vel.doAdd(impulses[1]);
 					collision.object.pos.doAdd(moves[1]);
 
-					collision.object.resolve(collision.dt);
-					collision.object.resolve(collision.dt);
+					this.recheckCollisions(collision.dt, colliders,
+						invoke, this, this.resolveCollision);
+					collision.object.recheckCollisions(collision.dt, colliders,
+						invoke, collision.object, collision.object.resolveCollision);
 				}
 
 				return this;
+			},
+			recheckCollisions: function(dt, colliders, callback, args) {
+				if(this.rechecks++ < this.maxRechecks) {
+					this.collisions.apply(this, arguments);
+				}
+
+				return this;
+			},
+			wrap: function(environment) {
+				var s = environment.boundRect.size;
+
+				while(this.pos.x < 0) { this.pos.x += s.x; }
+				while(this.pos.x > s.x) { this.pos.x -= s.x; }
+				
+				while(this.pos.y < 0) { this.pos.y += s.y; }
+				while(this.pos.y > s.y) { this.pos.y -= s.y; }
 			}
 		});
 		Entity.inherit = function(Type, deep) {
@@ -1533,8 +1599,12 @@
 	// }
 
 	// ENVIRONMENT {
-		
-	//}
+		function Wall(points, color) {
+			Shape.call(this, { points: (points || []),
+				color: (color || new Color(0, 0.5, 1, 0.1)) });
+		}
+		inherit(Wall, Shape);
+	// }
 	
 	// DEBUG {
 		/* GUI for testing */
@@ -1573,18 +1643,18 @@
 			.onChange(function(num) {
 				predSett.num = num |= 0;
 
-				while(num < lumens.swarm.length) {
-					var i = (Math.random()*(lumens.swarm.length-1)) | 0;
-					lumens.removePredator(lumens.swarm[i]);
+				while(num < lumens.swarm.source.length) {
+					var i = (Math.random()*(lumens.swarm.source.length-1)) | 0;
+					lumens.removePredator(lumens.swarm.source[i]);
 				}
-				while(num > lumens.swarm.length) { lumens.addPredator(); }
+				while(num > lumens.swarm.source.length) { lumens.addPredator(); }
 			});
 
 			var AIFolder = predatorFolder.addFolder("AI");
 
 			function setWeight(weight, influence) {
-				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].swarmForce.weight[influence] = weight;
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].swarmForce.weight[influence] = weight;
 				}
 			}
 
@@ -1603,8 +1673,8 @@
 
 			AIFolder.add(predSett.options.swarmForce, "predict",
 			0, 5).step(0.001).listen().onChange(function(predict) {
-				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].swarmForce.predict = predict;
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].swarmForce.predict = predict;
 				}
 			});
 
@@ -1615,30 +1685,30 @@
 			.onChange(function(weight) {
 				wander.weight = weight;
 
-				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].wanderForce.weight = weight;
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].wanderForce.weight = weight;
 				}
 			});
 			AIFolder.add(wanderSettings, "minSpeed", 0, 10).step(0.001)
 			.onChange(function(speed) {
 				wander.minSpeed = speed;
 
-				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].wanderForce.minSpeed = speed;
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].wanderForce.minSpeed = speed;
 				}
 			});
 			
 			AIFolder.add(predSett.options.swarmForce, "neighbourRad", 0, 1000)
 			.step(0.05).listen().onChange(function(rad) {
-				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].swarmForce.neighbourRad = rad;
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].swarmForce.neighbourRad = rad;
 				}
 			});
 			
 			AIFolder.add(predSett.options, "maxForce", 0, 1)
 			.step(0.005).listen().onChange(function(maxForce) {
-				for(var p = 0; p < lumens.swarm.length; ++p) {
-					lumens.swarm[p].maxForce = maxForce;
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].maxForce = maxForce;
 				}
 			});
 
@@ -1652,6 +1722,7 @@
 
 			environmentFolder.add(lumens.boundRect.size, "x").listen();
 			environmentFolder.add(lumens.boundRect.size, "y").listen();
+			environmentFolder.add(lumens, "toroid").listen();
 
 			//gui.close();
 
@@ -1659,7 +1730,7 @@
 		}
 	// }
 
-	// COMPONENTS {
+	// VIEWPORT {
 		function Viewport(options) {
 			if(!options) { options = {}; }
 
@@ -1678,7 +1749,8 @@
 			// TODO: replace with a Vec3D position (change z to zoom in/out)
 			this.zoomFactor = (options.zoomFactor || 1);
 
-			this.shapeTree = null;	// QuadTree, only concerned with the shapes
+			this.walls = new QuadTree(this.boundRect.copy(), 5, 4, options.walls);
+			this.shapes = new QuadTree(this.boundRect.copy(), 5, 8, options.shapes);
 			
 			this.$canvas = $(options.canvas);
 			this.canvas = this.$canvas[0];
@@ -1688,14 +1760,12 @@
 				factor: 0.004, restLength: 0, damping: 0.7 }, options.springForce);
 
 			this.restitution = (options.restitution || 0.75);
-			this.resolveLimit = (options.resolveLimit || 3);
-			this.resolves = 0;
 
-			// Setup size and shapeTree
+			// Setup size and shapes
 			this.resolve();
 			
 			this.environment = (options.environment || null);
-			this.shapes = (options.shapes || []);
+			// TODO: change all to trees
 			this.lights = (options.lights || []);
 			this.glows = (options.glows || []);
 
@@ -1740,7 +1810,6 @@
 			resolve: function(dt) {
 				if(dt) {
 					Particle.prototype.resolve.call(this, dt);
-
 					this.reposition();
 				}
 
@@ -1768,20 +1837,10 @@
 				return collisions;
 			},
 			resolveCollision: function(collision) {
-				/*this.vel.doAdd(Impulse.collision({
-					dt: collision.dt, normal: collision.normal,
-					restitution: this.restitution, point1: this
-				}));*/
 				this.pos.doAdd(Move.penetration({ normal: collision.normal,
 					penetration: collision.penetration, point1: this
 				}));
 				this.reposition();
-
-				/*if(this.resolves++ < this.resolveLimit) {
-					this.resolve(collision.dt)
-						.collisions(collision.dt,
-							invoke, this, this.resolveCollision);
-				}*/
 
 				return this;
 			},
@@ -1805,8 +1864,6 @@
 				this.force.doAdd(Force.dampedSpring(this.springForce));
 				this.springForce.posTo = to;
 
-				this.resolves = 0;
-
 				return this;
 			},
 			setup: function() {
@@ -1818,7 +1875,31 @@
 				this.context.scale(this.zoomFactor, this.zoomFactor);
 				this.context.translate(-this.boundRect.pos.x, -this.boundRect.pos.y);
 
-				this.shapeTree = new QuadTree(this.boundRect.copy(), 5, 8);
+				// TODO: all trees
+				this.lights.length = this.glows.length = 0;
+				this.walls.clear();
+				this.shapes.clearAll();
+
+				this.walls = new QuadTree(this.boundRect.copy(), 5, 4, this.walls.source);
+				this.shapes = new QuadTree(this.boundRect.copy(), 5, 8);
+
+				return this;
+			},
+			add: function(entity) {
+				var shapeTreeItem = entity.shape.treeItem();
+
+				if(this.boundRect.intersects(shapeTreeItem)) {
+					this.shapes.add(entity.shape).put(shapeTreeItem);
+				}
+				// TODO: change all to trees
+				if(entity.glow && this.boundRect
+					.intersects(entity.glow.containingAARect())) {
+					this.glows.push(entity.glow);
+				}
+				if(entity.light && this.boundRect
+					.intersects(entity.light.containingAARect())) {
+					this.lights.push(entity.light);
+				}
 
 				return this;
 			},
@@ -1832,8 +1913,8 @@
 
 				for(var l = 0; l < this.lights.length; ++l) {
 					var light = this.lights[l],
-						lit = ((this.shapeTree)?
-							this.shapeTree.get(light.containingAARect()) : null);
+						lit = ((this.shapes)?
+							this.shapes.get(light.containingAARect()) : null);
 					
 					if(lit) {
 						for(var lT = 0; lT < lit.length; ++lT) {
@@ -1852,14 +1933,21 @@
 				this.context.globalCompositeOperation = 'source-atop';
 
 				for(var lB = 0; lB < litBodies.length; ++lB) {
-					var body = litBodies[lB].render(this.context);
+					litBodies[lB].render(this.context);
 				}
 
+				// TODO: all trees
 				/* Glowing cores - drawn everywhere */
 				this.context.globalCompositeOperation = 'destination-over';
 
 				for(var g = 0; g < this.glows.length; ++g) {
-					var glow = this.glows[g].render(this.context);
+					this.glows[g].render(this.context);
+				}
+
+				this.context.globalCompositeOperation = 'source-over';
+				var visibleWalls = this.walls.get(this.boundRect);
+				for(var w = 0; w < visibleWalls.length; ++w) {
+					visibleWalls[w].render(this.context);
 				}
 
 				if(this.environment) {
@@ -1870,7 +1958,6 @@
 				this.renderDebug();
 
 				this.context.restore();
-				this.clear();
 
 				/* Should be managed asynchronously from here,
 					as a web worker:
@@ -1885,12 +1972,6 @@
 
 				return this;
 			},
-			clear: function() {
-				this.shapes.length = this.lights.length = this.glows.length = 0;
-				if(this.shapeTree) { this.shapeTree.clear(); }
-				
-				return this;
-			},
 			renderDebug: function() {
 				this.context.save();
 				this.context.globalCompositeOperation = 'source-over';
@@ -1902,12 +1983,12 @@
 				if(this.settings.trails) { renderFuncs.push(this.renderTrail); }
 
 				for(var f = 0; f < renderFuncs.length; ++f) {
-					for(var s = 0; s < this.shapes.length; ++s) {
-						renderFuncs[f].call(this, this.shapes[s]);
+					for(var s = 0; s < this.shapes.source.length; ++s) {
+						renderFuncs[f].call(this, this.shapes.source[s]);
 					}
 				}
 
-				if(this.settings.tree) { this.renderTree(); }
+				if(this.settings.tree) { this.renderShapeTree(); }
 
 				this.context.restore();
 			},
@@ -1939,7 +2020,7 @@
 
 				return this;
 			},
-			renderTree: function() {
+			renderShapeTree: function() {
 				(function(node) {
 					if(node.nodes.length) {
 						for(var n = 0; n < node.nodes.length; ++n) {
@@ -1952,7 +2033,7 @@
 						this.context.stroke();
 						this.context.restore();
 					}
-				}).call(this, this.shapeTree.root);
+				}).call(this, this.shapes.root);
 
 				return this;
 			}
@@ -1962,7 +2043,9 @@
 				beyond that of the viewport - throw in something just to
 				show you thought of it... */
 		});
-
+	// }
+	
+	// CONTROLLERS {
 		function Controller(lumens) {
 			this.lumens = lumens;
 
@@ -2280,6 +2363,29 @@
 		});
 	// }
 
+	// NETWORK {
+		Network = {
+			loadWalls: function(JSON) {
+				var walls = [];
+
+				for(var w = 0; w < JSON.length; ++w) {
+					walls.push(new Wall(Network.loadWall(JSON[w])));
+				}
+
+				return walls;
+			},
+			loadWall: function(JSON) {
+				var points = [];
+
+				for(var p = 0; p < JSON.points.length; ++p) {
+					points.push(new Particle({ pos: new Vec2D().copy(JSON.points[p]) }));
+				}
+
+				return points;
+			}
+		};
+	// }
+
 	// MAIN {
 		/* Manages the application, and represents the environment
 			(for convenience) */
@@ -2287,7 +2393,6 @@
 			if(!options) { options = {}; }
 
 			this.settings = $.extend(true, {
-				size: Lumens.minSize.copy(),
 				viewport: {
 					mass: 200, size: Lumens.minSize.copy(), environment: this,
 					springForce: {}
@@ -2297,10 +2402,10 @@
 				predators: {
 					num: 300,
 					options: {
-						mass: 8,
+						mass: 6,
 						swarmForce: {
 							swarm: null, neighbourRad: 90, predict: 0.6,
-							weight: { separation: 0.004, cohesion: 0.0002, alignment: 0.01 }
+							weight: { separation: 0.601, cohesion: 0.0002, alignment: 0.01 }
 						},
 						wanderForce: { range: 0.6, minSpeed: 0.8, weight: 3.501 },
 						maxForce: 0.006
@@ -2308,32 +2413,32 @@
 				}
 			}, options);
 
-			this.boundRect = new AARect(null, this.settings.size);
+			this.boundRect = new AARect(null, (options.size || Lumens.minSize.copy()));
 			this.color = (options.color || new Color());
-			
-			this.entities = [];
-			this.swarm = [];
-			
-			this.entityTree = new QuadTree(this.boundRect.copy(), 5, 8);
-			this.swarmTree = new QuadTree(this.boundRect.copy(), 5, 8);
+			this.toroid = (options.toroid || false);
 
-			this.settings.predators.options.swarmForce.swarm = this.swarmTree;
+			this.walls = new QuadTree(this.boundRect.copy(), 5, 8,
+				(options.walls || []));
+			this.entities = new QuadTree(this.boundRect.copy(), 5, 8,
+				(options.entities || []));
+			this.swarm = new QuadTree(this.boundRect.copy(), 5, 8,
+				(options.swarm || []));
+			
+			this.settings.player.pos = this.boundRect.size.scale(0.5);
+			this.player = new Firefly(this.settings.player);
+			this.entities.add(this.player);
+
+			this.settings.predators.options.swarmForce.swarm = this.swarm;
 			
 			for(var p = 0; p < this.settings.predators.num; ++p) {
 				this.addPredator();
 			}
-			
-			this.settings.player.pos = this.boundRect.size.scale(0.5);
-			this.player = new Firefly(this.settings.player);
-			this.entities.unshift(this.player);
 
 			this.settings.viewport.springForce.posTo = this.player.pos;
+			this.settings.viewport.walls = this.walls.source;
 			this.viewport = new Viewport(this.settings.viewport);
 
 			this.controller = Controller.make(this);
-
-			//this.persistor = new Persistor();
-			//this.networker = new Networker();
 
 			this.controller.events.move.watch(invoke, this.player, this.player.move);
 			this.controller.events.aim.watch(invoke, this.player, this.player.aim);
@@ -2349,8 +2454,7 @@
 				occur more frequently between these frames
 				Finer time steps for updates - Heavy deep copy of quadtree
 			this.viewport.renderDone.watch((function() {
-				this.viewport.shapes ... this.entities;
-				this.viewport.shapeTree ... this.entityTree;
+				this.viewport.shape ... this.entities;
 			}).call, this); */
 			
 			this.frameUpdate = (options.frameUpdate || 1000);
@@ -2384,31 +2488,35 @@
 
 				if(this.state === Lumens.states.running) {
 					/* Clear the Quadtrees */
-					this.entityTree.clear();
-					this.swarmTree.clear();
+					this.entities.clear();
+					this.swarm.clear();
 					
 					/* Resolve everything */
-					for(var r = 0; r < this.entities.length; ++r) {
-						var entity = this.entities[r].resolve(dt);
+					for(var r = 0; r < this.entities.source.length; ++r) {
+						var entity = this.entities.source[r].resolve(dt);
 
-						entity.collisions(dt, this.entityTree, this,
+						entity.collisions(dt, {
+								entities: this.entities,
+								walls: this.walls,
+								environment: this
+							},
 							invoke, entity, entity.resolveCollision);
 
 						var treeItem = entity.treeItem();
 						
 						/* Populate Quadtrees */
-						this.entityTree.add(treeItem);
+						this.entities.put(treeItem);
 						
 						if(instance(entity, Predator)) {
-							this.swarmTree.add(treeItem);
+							this.swarm.put(treeItem);
 						}
 					}
 
 					/* Update everything:
 						collision resolution, force accumulation,
 						anything querying the Quadtrees */
-					for(var u = 0; u < this.entities.length; ++u) {
-						this.entities[u].update(dt);
+					for(var u = 0; u < this.entities.source.length; ++u) {
+						this.entities.source[u].update(dt);
 					}
 				}
 
@@ -2420,35 +2528,16 @@
 				} */
 
 				this.viewport.setup();
-				this.populateViewport();
+
+				for(var v = 0; v < this.entities.source.length; ++v) {
+					this.viewport.add(this.entities.source[v]);
+				}
+
 				this.viewport.render();
 
 				this.frames++;
 
 				requestAnimationFrame(function() { lumens.step(); });
-
-				return this;
-			},
-			populateViewport: function() {
-				for(var r = 0; r < this.entities.length; ++r) {
-					var entity = this.entities[r],
-						treeItem = entity.shape.boundRad.containingAARect();
-
-					treeItem.item = entity.shape;
-
-					if(this.viewport.boundRect.intersects(treeItem)) {
-						this.viewport.shapes.push(entity.shape);
-						this.viewport.shapeTree.add(treeItem);
-					}
-					if(entity.light && this.viewport.boundRect
-						.intersects(entity.light.containingAARect())) {
-						this.viewport.lights.push(entity.light);
-					}
-					if(entity.glow && this.viewport.boundRect
-						.intersects(entity.glow.containingAARect())) {
-						this.viewport.glows.push(entity.glow);
-					}
-				}
 
 				return this;
 			},
@@ -2475,14 +2564,14 @@
 									Math.sin(angle))
 						}));
 				
-				this.entities.push(predator);
-				this.swarm.push(predator);
+				this.entities.add(predator);
+				this.swarm.add(predator);
 
 				return this;
 			},
 			removePredator: function(predator) {
-				this.swarm.splice(this.swarm.indexOf(predator), 1);
-				this.entities.splice(this.entities.indexOf(predator), 1);
+				this.swarm.source.splice(this.swarm.source.indexOf(predator), 1);
+				this.entities.source.splice(this.entities.source.indexOf(predator), 1);
 				// Trees get cleared anyway...
 
 				return this;
@@ -2523,17 +2612,6 @@
 				}
 
 				return collision;
-			},
-			wrap: function(entity) {
-				while(entity.pos.x < 0) { entity.pos.x += this.boundRect.size.x; }
-				while(entity.pos.x > this.boundRect.size.x) {
-					entity.pos.x -= this.boundRect.size.x;
-				}
-				
-				while(entity.pos.y < 0) { entity.pos.y += this.boundRect.size.y; }
-				while(entity.pos.y > this.boundRect.size.y) {
-					entity.pos.y -= this.boundRect.size.y;
-				}
 			}
 		});
 		$.extend(Lumens, {
@@ -2548,14 +2626,15 @@
 	// }
 
 	$(function() {
-		var lumens = new Lumens({
+		$.getJSON("js/test_environment.json", function(JSON) {
+			var lumens = new Lumens({
 				size: new Vec2D(3000, 2000),
+				walls: Network.loadWalls(JSON),
 				viewport: { canvas: '#lumens',
 					settings: { trails: true, bounds: true } }
 			});
 
-		addGUI(lumens);
+			addGUI(lumens);
+		});
 	});
-
-	// TODO: Brownian motion for physics - freeze resting objects to avoid jitter
 })(jQuery);
