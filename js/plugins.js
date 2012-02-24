@@ -20,7 +20,7 @@ if(!window.requestAnimationFrame) {
 		};
 }
 
-(function($){
+(function($) {
 	/* Math */
 	Math.pinToRange = function(min, value, max) {
 		return Math.max(Math.min(value, max), min);
@@ -40,6 +40,17 @@ if(!window.requestAnimationFrame) {
 			}
 
 			return this;
+		},
+		remove: function(element) {
+			var removed = false;
+
+			for(var i = this.indexOf(element); i >= 0;
+				i = this.indexOf(element)) {
+				this.splice(i, 1);
+				removed = true;
+			}
+
+			return removed;
 		}
 	});
 	

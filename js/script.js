@@ -1,7 +1,7 @@
 /* Author: Eoghan O'Keeffe */
 
 (function($) {
-	// UTIL {
+//	UTIL {
 		/* Static wrapper for apply
 			Maintains the this value no matter how many times it's passed around
 			Useful for callbacks */
@@ -22,15 +22,11 @@
 		/* Safer than inheriting from new Parent(), as Object.create
 			circumvents the constructor, which could cause problems (needing
 			a whole load of arguments, having throw clauses, etc) */
-		function inherit(Child, Parent, deep) {
-			var inheritance = [Child, Parent, {
-					prototype: Object.create(Parent.prototype),
-					constructor: Child
-				}];
+		function inherit(Child, Parent) {
+			Child.prototype = Object.create(Parent.prototype);
+			Child.prototype.constructor = Child;
 
-			if(deep) { inheritance.unshift(deep); }
-
-			return $.extend.apply($, inheritance);
+			return Child;
 		}
 
 		/* Simple observable class: subscribe/unsubscribe with id and
@@ -314,7 +310,7 @@
 		*/
 		/* Operates on items with the structure { x, y } for Nodes
 			and { x, y, width, height } for BoundsNodes */
-		function QuadTree(boundRect, maxDepth, maxKids, source, pointQuad) {
+		function QuadTree(boundRect, maxDepth, maxKids, source, converter, pointQuad) {
 			this.root = ((pointQuad)?
 					new Node(boundRect, 0, maxDepth, maxKids)
 				:	new BoundsNode(boundRect, 0, maxDepth, maxKids));
@@ -322,16 +318,35 @@
 			// Array of whatever the tree is populated from - generic, convenience
 			this.source = (source || []);
 
-			if(this.source.length) { this.put(source); }
+			if(this.source.length) { this.put(source, converter); }
 		}
 		$.extend(QuadTree.prototype, {
 			add: function(source) {
 				this.source = this.source.concat(source); return this;
 			},
-			put: function(item) { this.root.put(item); return this; },
-			clear: function() { this.root.clear(); return this; },
-			clearAll: function() { this.source.length = 0; return this.clear(); },
-			get: function(item) { return this.root.get(item).slice(0); }
+			put: function(item, converter) {
+				if(converter) {
+					if($.isArray(item)) {
+						for(var i = 0; i < item.length; ++i) {
+							this.put(item[i], converter);
+						}
+					}
+					else { this.root.put(converter.call(null, item)); }
+				}
+				else { this.root.put(item); }
+				
+				return this;
+			},
+			get: function(item) { return this.root.get(item).slice(0); },
+			clear: function(item) {
+				if(item === true) {
+					this.source.length = 0;
+					item = null;
+				}
+
+				this.root.clear(item);
+				return this;
+			}
 		});
 
 
@@ -367,35 +382,87 @@
 			get: function(item) {
 				var kids = [];
 				
-				if($.isArray(item)) {
-					// May duplicate kids
-					for(var i = 0; i < item.length; ++i) {
-						kids = kids.concat(this.get(item[i]));
+				if(item) {
+					if($.isArray(item)) {
+						// May duplicate kids
+						for(var i = 0; i < item.length; ++i) {
+							kids = kids.concat(this.get(item[i]));
+						}
 					}
-				}
-				else if(this.nodes.length) {
-					var nodes = this.nodesFor(item);
+					else if(this.nodes.length) {
+						var nodes = this.nodesFor(item);
 
-					for(var n = 0; n < nodes.length; ++n) {
-						kids = kids.concat(nodes[n].get(item));
+						for(var n = 0; n < nodes.length; ++n) {
+							kids = kids.concat(nodes[n].get(item));
+						}
 					}
+					else { kids = kids.concat(this.kids); }
 				}
-				else { kids = kids.concat(this.kids); }
 				
 				return kids;
+			},
+			clear: function(item) {
+				if(item) {
+					// Note: item here refers to the exact object stored in the tree
+					if($.isArray(item)) {
+						for(var i = 0; i < item.length; ++i) { this.clear(item[i]); }
+					}
+					else if(this.nodes.length) {
+						var node = this.nodesFor(item)[0];
+
+						if(node) {
+							if(node.nodes.length) { node.clear(item); }
+							else if(node.kids.remove(item)) {
+								var nodeKids = 0;
+
+								for(var l = 0; l < this.nodes.length; ++l) {
+									var nL = this.nodes[l];
+
+									// Don't merge if node still has subnodes
+									if(nL.nodes.length) {
+										nodeKids = Infinity;
+										break;
+									}
+									else { nodeKids += nL.kids.length; }
+								}
+
+								if(nodeKids <= this.maxKids) { this.merge(); }
+							}
+							else {
+								//log("QuadTree Warning: item to be cleared not found");
+							}
+						}
+					}
+					else if(!this.kids.remove(item)) {
+						//log("QuadTree Warning: item to be cleared not found");
+					}
+				}
+				else {
+					this.kids.length = 0;
+					
+					for(var n = 0; n < this.nodes.length; ++n) {
+						this.nodes[n].clear();
+					}
+					
+					this.nodes.length = 0;
+				}
+				
+				return this;
 			},
 			nodesFor: function(item) {
 				var nodes = [];
 
-				if(!item.size) { item.size = new Vec2D(); }
+				if(item) {
+					if(!item.size) { item.size = new Vec2D(); }
 
-				for(var n = 0; n < this.nodes.length; ++n) {
-					var node = this.nodes[n];
-					if(node.boundRect.contains(item)) {
-						nodes.push(node);
-						break;
+					for(var n = 0; n < this.nodes.length; ++n) {
+						var node = this.nodes[n];
+						if(node.boundRect.contains(item)) {
+							nodes.push(node);
+							break;
+						}
+						else if(node.boundRect.intersects(item)) { nodes.push(node); }
 					}
-					else if(node.boundRect.intersects(item)) { nodes.push(node); }
 				}
 
 				return nodes;
@@ -435,13 +502,16 @@
 				
 				return this;
 			},
-			clear: function() {
-				this.kids.length = 0;
-				
-				for(var n = 0; n < this.nodes.length; ++n) { this.nodes[n].clear(); }
-				
+			merge: function() {
+				for(var n = 0; n < this.nodes.length; ++n) {
+					var node = this.nodes[n].merge();
+
+					this.kids = this.kids.concat(node.kids);
+					node.clear();
+				}
+
 				this.nodes.length = 0;
-				
+
 				return this;
 			}
 		});
@@ -451,7 +521,7 @@
 		
 		function BoundsNode(boundRect, depth, maxDepth, maxKids) {
 			Node.apply(this, arguments);
-			this.borderKids = [];
+			this.edgeKids = [];
 		}
 		BoundsNode.corners = Node.corners;
 		$.extend(inherit(BoundsNode, Node).prototype, {
@@ -463,7 +533,7 @@
 					else if(this.nodes.length) {
 						var nodes = this.nodesFor(item);
 						
-						if(nodes.length > 1) { this.borderKids.push(item); }
+						if(nodes.length > 1) { this.edgeKids.push(item); }
 						else if(nodes.length) { nodes[0].put(item); }
 					}
 					else if(this.kids.push(item) > this.maxKids &&
@@ -478,31 +548,92 @@
 			get: function(item) {
 				var kids = [];
 				
-				if($.isArray(item)) {
-					// May duplicate kids
-					for(var i = 0; i < item.length; ++i) {
-						kids = kids.concat(this.get(item[i]));
-					}
-				}
-				else {
-					if(this.nodes.length) {
-						var nodes = this.nodesFor(item);
-
-						for(var n = 0; n < nodes.length; ++n) {
-							kids = kids.concat(nodes[n].get(item));
+				if(item) {
+					if($.isArray(item)) {
+						// May duplicate kids
+						for(var i = 0; i < item.length; ++i) {
+							kids = kids.concat(this.get(item[i]));
 						}
 					}
-					else { kids = kids.concat(this.kids); }
+					else {
+						if(this.nodes.length) {
+							var nodes = this.nodesFor(item);
 
-					kids = kids.concat(this.borderKids);
+							for(var n = 0; n < nodes.length; ++n) {
+								kids = kids.concat(nodes[n].get(item));
+							}
+						}
+						else { kids = kids.concat(this.kids); }
+
+						kids = kids.concat(this.edgeKids);
+					}
 				}
 				
 				return kids;
 			},
-			clear: function() {
-				this.borderKids.length = 0;
+			clear: function(item) {
+				if(item) {
+					// Note: item here refers to the exact object stored in the tree
+					if($.isArray(item)) {
+						for(var i = 0; i < item.length; ++i) { this.clear(item[i]); }
+					}
+					else if(this.nodes.length) {
+						var nodes = this.nodesFor(item), node = nodes[0];
+
+						if(nodes.length > 1) {
+							if(!this.edgeKids.remove(item)) {
+								//log("QuadTree Warning: item to be cleared not found");
+							}
+						}
+						else if(node) {
+							if(node.nodes.length) { node.clear(item); }
+							else if(node.kids.remove(item)) {
+								var nodeKids = 0;
+
+								for(var l = 0; l < this.nodes.length; ++l) {
+									var nL = this.nodes[l];
+
+									// Don't merge if node still has subnodes
+									if(nL.nodes.length) {
+										nodeKids = Infinity;
+										break;
+									}
+									else { nodeKids += nL.kids.length; }
+								}
+
+								if(nodeKids <= this.maxKids) { this.merge(); }
+							}
+							else {
+								//log("QuadTree Warning: item to be cleared not found");
+							}
+						}
+					}
+					else {
+						if(!this.kids.remove(item) && !this.edgeKids.remove(item)) {
+							//log("QuadTree Warning: item to be cleared not found");
+						}
+					}
+				}
+				else {
+					this.edgeKids.length = 0;
+					
+					return Node.prototype.clear.call(this);
+				}
 				
-				return Node.prototype.clear.call(this);
+				return this;
+			},
+			merge: function() {
+				for(var n = 0; n < this.nodes.length; ++n) {
+					var node = this.nodes[n].merge();
+					
+					this.kids = this.kids.concat(node.kids);
+					this.edgeKids = this.edgeKids.concat(node.edgeKids);
+					node.clear();
+				}
+
+				this.nodes.length = 0;
+
+				return this;
 			}
 		});
 
@@ -646,9 +777,9 @@
 				return this;
 			}
 		});
-	// }
+//	}
 	
-	// PHYSICS {
+//	PHYSICS {
 		/* See Game Physics Engine Development, by Ian Millington */
 		function Particle(options) {
 			if(!options) { options = {}; }
@@ -779,212 +910,693 @@
 			}
 		});
 
-
-		var Force = {
-			/* See Game Physics Engine Development, by Ian Millington */
-			// { Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target) }
-			spring: function(options) {
-				var force = options.posTo.sub(options.posFrom),
-					length = force.mag();
-				
-				return ((length)? force.doScale(options.factor*
-						Math.abs(length-options.restLength)/length)
-					:	force);
-			},
-			// { Particle pointFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target), Number damping }
-			dampedSpring: function(options) {
-				var from = options.pointFrom.pos;
-
-				options.posFrom = from;
-
-				var spring = this.spring(options), damp;
-
-				if(from.equals(options.posTo)) {
-					damp = options.pointFrom.vel.scale(-1);
-				}
-				else {
-					damp = from.sub(options.posTo).doUnit();
-					damp.doScale(Math.max(-1*options.pointFrom.vel.dot(damp), 0)*
-						(($.isNumeric(options.damping))? options.damping : 1));
-				}
-
-				delete options.posFrom;
-
-				return damp.doAdd(spring);
-			},
-			/* Adapted from "How To Implement a Pressure Soft Body
-				Model", by Maciej Matyka, using Gauss' theorem to obtain volume,
-				and pressure from there - maq@panoramix.ift.uni.wroc.pl */
-			/* A bit different to the others, in that it doesn't return a force to
-				be applied to each point in turn, but rather applies it across
-				all of the points in turn */
-			applyPressure: function(points, factor) {
-				// Derived used to prevent repeated calculations
-				var volume = 0, derived = [];
-
-				for(var p = 0; p < points.length; ++p) {
-					var from = points[p], to = points.wrap(p-1),
-						vec = from.pos.sub(to.pos),
-						mag = vec.mag();
-
-					if(mag) {
-						var normal = vec.perp().doScale(-1/mag);
-						
-						volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
-						derived.push({ from: from, to: to, mag: mag, normal: normal});
-					}
-				}
-
-				var invVolume = 1/volume;
-				for(var d = 0; d < derived.length; ++d) {
-					var data = derived[d],
-						pressure = invVolume*factor*data.mag;
-					
-					data.from.force.doAdd(data.normal.scale(pressure));
-					data.to.force.doAdd(data.normal.scale(pressure));
-				}
-			},
-			// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
-			// { Number range, Vec2D vel }
-			wander: function(options) {
-				/* range is proportional to the distance either side of the current
-					heading within which the entity may wander (radius of wander circle)
-					vel is the minimum velocity vector which wandering may produce
-					(distance wander circle is ahead of the entity) */
-				var angle = Math.random()*2*Math.PI;
-				return options.vel.add(new Vec2D(options.range*Math.cos(angle),
-					options.range*Math.sin(angle)));
-			},
-			/* Adapted from Craig Reynolds' famous Boids - http://www.red3d.com/cwr/boids/
-				and Harry Brundage's implementation, among others - http://harry.me/2011/02/17/neat-algorithms---flocking */
-			// { QuadTree swarm, Particle member, Number neighbourRad, { Number separation, Number alignment, Number cohesion } weight, Number predict (o) }
-			swarm: function(options) {
-				var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
-					totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
-					
-					predict = (options.predict || 0),
-					focus = options.member.vel.scale(predict)
-						.doAdd(options.member.pos),
-					neighbours = options.swarm.get((new Circle(focus,
-							options.neighbourRad)).containingAARect()),
-					
-					num = 0;
-				
-				for(var n = 0; n < neighbours.length; ++n) {
-					var neighbour = neighbours[n].item;
-					
-					if(options.member !== neighbour) {
-						var neighbourFocus = neighbour.vel.scale(predict)
-								.doAdd(neighbour.pos),
-							vec = focus.sub(neighbourFocus),
-							dist = vec.mag();
-
-						if(dist < options.neighbourRad) {
-							++num;
-
-							var distFactor = options.neighbourRad/dist;
-							totalSeparation.doAdd(vec.doUnit()
-								.doScale(distFactor*distFactor));
-							
-							totalCohesion.doAdd(neighbourFocus).doSub(focus);
-							
-							var alignment = (neighbour.angle ||
-								((neighbour.vel.magSq())?
-									neighbour.vel.unit() : null));
-							
-							if(alignment) { totalAlignment.doAdd(alignment); }
-						}
-					}
-				}
-				
-				if(num) {
-					swarmForce.doAdd(totalSeparation.doScale(options.weight.separation))
-						.doAdd(totalCohesion.doScale(options.weight.cohesion))
-						.doAdd(totalAlignment.doScale(options.weight.alignment))
-						.doScale(1/num);
-				}
-				
-				return swarmForce;
+	//	COLLISIONS {
+			// Convenience
+			function Collision(self, other, normal, penetration, dt) {
+				this.self = self;
+				this.other = other;
+				this.normal = (normal || new Vec2D());
+				this.penetration = (penetration || 0);
+				this.dt = (dt || 0);
 			}
-		};
+			$.extend(Collision.prototype, {
+				copy: function(other) {
+					if(other) {
+						return new this.constructor(this.self, this.other,
+								this.normal, this.penetration, this.dt);
+					}
+					else {
+						this.constructor.call(this, other.self, other.other,
+							other.normal, other.penetration, other.dt);
 
+						return this;
+					}
+				},
+				swap: function() { return this.copy().doSwap(); },
+				doSwap: function() {
+					var other = this.self;
 
-		Impulse = {
-			/* See Game Physics Engine Development, by Ian Millington */
-			/* { Number dt, Vec2D normal, Number restitution, Particle point1, Particle point2 o } */
-			collision: function(options) {
-				var impulse = new Vec2D();
+					this.self = this.other;
+					this.other = other;
+					this.normal.doScale(-1);
 
-				if(options.restitution) {
-					var relVel = options.point1.vel.copy();
+					return this;
+				}
+			});
+			$.extend(Collision, {
+				Circle: {
+					checkLine: function(circle, a, b) {
+						var collision = null;
 
-					if(options.point2) { relVel.doSub(options.point2.vel); }
+						/* If the angle between the vectors of
+							(1) the edge's normal and (2) the vector from the
+							circle's center 'c' to a point 'a' on the edge is
+							perpendicular, then 'c' is on the edge (for infinite edge)
+								(c-a).n < 0 if p is outside the edge
+								(c-a).n = 0 if p is on the edge
+								(c-a).n > 0 if p is inside the edge
+							
+							Adjusting for the circle's radius gives:
+								penetration = (c-a).n+rad */
+						/*
+						var edge = b.sub(a),
+							l = edge.mag();
 
-					var sepVel = relVel.dot(options.normal);
+						if(l) {
+							var vec = a.add(edge.scale(0.5))
+									.sub(circle.pos);
 
-					if(sepVel <= 0) {
-						var closeVel = -sepVel*options.restitution,
-							relAcc = options.point1.acc.copy();
+							if(vec.mag()-circle.rad <= l/2) {
+								var normal = edge.doScale(1/l).perp(),
+									penetration = vec.dot(normal)+circle.rad;
 
-						if(options.point2) { relAcc.doSub(options.point2.acc); }
+								if(0 < penetration &&
+									penetration < 2*circle.rad) {
+									collision = new Collision(circle, [a, b],
+										normal, penetration);
+								}
+							}
+						}*/
 
-						var accSepVel = relAcc.dot(options.normal)*options.dt;
+						/* The closest point 'p' on the edge to the circle's
+							center 'c' - given by the start 'a' of the edge plus
+							the dot projection 't' of 'c' onto the edge - indicates
+							a collision if its distance to the circle's center is
+							less than the circle's radius (for an infinite edge).
+							The range may be limited to the segment by limiting 't' */
+						var line = b.sub(a), vec = circle.pos.sub(a),
+							l = line.mag(), penSq = 0;
 
-						if(accSepVel < 0) {
-							closeVel = Math.max(closeVel+accSepVel*
-								options.restitution, 0);
+						if(l) {
+							var t = Math.pinToRange(-circle.rad,
+									vec.dot(line.doScale(1/l)), l+circle.rad),
+
+								closest = a.add(line.scale(t)),
+								toCenter = circle.pos.sub(closest),
+								lSq = toCenter.magSq();
+							
+							penSq = circle.radSq-lSq;
+						}
+						else { penSq = cirlce.radSq-vec.magSq(); }
+
+						if(penSq > 0) {
+							collision = new Collision(circle, [a, b],
+								line.doPerp(), Math.sqrt(penSq));
 						}
 
-						var deltaVel = closeVel-sepVel,
-							totalInvMass = options.point1.invMass;
+						return collision;
+					}
+				},
+				Shape: {
+					// colliders: { QuadTree shapes, Lumens lumens, QuadTree walls }
+					check: function(shape, colliders, dt, callback, args) {
+						var collisions = [], treeItem = shape.treeItem;
 
-						if(options.point2) {
-							totalInvMass += options.point2.invMass;
+						// TODO: fine collision detection
+						if(colliders.shapes) {
+							for(var nearby = colliders.shapes.get(treeItem),
+								n = 0; n < nearby.length; ++n) {
+								var shapeCollision = this.checkShape(shape,
+										nearby[n].item);
+
+								if(shapeCollision) {
+									shapeCollision.dt = dt;
+									collisions.push(shapeCollision);
+									this.resolveShape(shapeCollision);
+
+									if(callback) {
+										callback.apply(null,
+											Array.prototype.slice.call(arguments, 4)
+												.concat(shapeCollision));
+									}
+								}
+							}
 						}
+
+						if(colliders.lumens) {
+							var envCollision = Collision.Lumens
+									.checkRect(colliders.lumens, treeItem);
+
+							if(envCollision) {
+								envCollision.dt = dt;
+								envCollision.doSwap().self = shape;
+								collisions.push(envCollision);
+								this.resolveLumens(envCollision);
+
+								if(callback) {
+									callback.apply(null,
+										Array.prototype.slice.call(arguments, 4)
+											.concat(envCollision));
+								}
+							}
+						}
+
+						if(colliders.walls) {
+							for(var walls = colliders.walls.get(treeItem), w = 0;
+								w < walls.length; ++w) {
+								var wallCollision = this.checkWall(shape,
+										walls[w].item);
+
+								if(wallCollision) {
+									wallCollision.dt = dt;
+									collisions.push(wallCollision);
+									this.resolveWall(wallCollision);
+
+									if(callback) {
+										callback.apply(null,
+											Array.prototype.slice.call(arguments, 4)
+												.concat(wallCollision));
+									}
+								}
+							}
+						}
+
+						return collisions;
+					},
+					checkShape: function(shape, other) {
+						var collision = null;
+
+						if(shape !== other &&
+							shape.boundRad.intersects(other.boundRad)) {
+							//  TODO: narrow collision detection
+							var normal = shape.owner.pos.sub(other.owner.pos),
+								norMag = normal.mag(),
+								penetration =
+									(shape.boundRad.rad+other.boundRad.rad)-norMag;
+
+							if(!norMag) {
+								//log("Shape Collision Warning: shapes have the same center", shape, other);
+							}
+							else if(penetration > 0) {
+								collision = new Collision(shape, other,
+										normal.doScale(1/norMag), penetration);
+							}
+						}
+
+						return collision;
+					},
+					checkWall: function(shape, other) {
+						// TODO: fine collision detection
+						/* TODO: improve to check if shape intersects edges, not
+							if some of it lies on the "inside" */
+						var collision = null;
+
+						if(other.boundRad.intersects(shape.boundRad)) {
+							for(var p = 0; p < other.points.length; ++p) {
+								var a = other.points.wrap(p-1).pos,
+									b = other.points[p].pos,
+									c = Collision.Circle.checkLine(shape.boundRad,
+										a, b);
+
+								if(c && (!collision ||
+									c.penetration > collision.penetration)) {
+									c.self = shape;
+									c.other = other;
+									collision = c;
+								}
+							}
+						}
+
+						return collision;
+					},
+					resolveLumens: function(collision) {
+						collision.self.updateBounds();
+
+						return this;
+					},
+					resolveShape: function(collision) {
+						collision.self.updateBounds();
+						collision.other.updateBounds();
+
+						return this;
+					},
+					resolveWall: function(collision) {
+						collision.self.updateBounds();
+
+						return this;
+					}
+				},
+				Entity: {
+					// colliders: { QuadTree entities, Lumens lumens, QuadTree walls }
+					check: function(entity, colliders, dt, callback, args) {
+						var collisions = [], treeItem = entity.treeItem;
+
+						// TODO: fine collision detection (shape)
+						if(colliders.entities) {
+							for(var nearby = colliders.entities.get(treeItem),
+								n = 0; n < nearby.length; ++n) {
+								var entityCollision = this.checkEntity(entity,
+										nearby[n].item);
+								
+								if(entityCollision) {
+									entityCollision.dt = dt;
+									collisions.push(entityCollision);
+									this.resolveEntity(entityCollision);
+
+									if(callback) {
+										callback.apply(null,
+											Array.prototype.slice.call(arguments, 4)
+												.concat(entityCollision));
+									}
+								}
+							}
+						}
+
+						if(colliders.lumens) {
+							var envCollision = Collision.Lumens
+									.checkRect(colliders.lumens, treeItem);
+
+							if(envCollision) {
+								envCollision.dt = dt;
+								envCollision.doSwap().self = entity;
+								collisions.push(envCollision);
+								this.resolveLumens(envCollision);
+
+								if(callback) {
+									callback.apply(null,
+										Array.prototype.slice.call(arguments, 4)
+											.concat(envCollision));
+								}
+							}
+						}
+
+						if(colliders.walls) {
+							for(var walls = colliders.walls.get(treeItem), w = 0;
+								w < walls.length; ++w) {
+								var wallCollision = this.checkWall(entity,
+										walls[w].item);
+
+								if(wallCollision) {
+									wallCollision.dt = dt;
+									collisions.push(wallCollision);
+									this.resolveWall(wallCollision);
+
+									if(callback) {
+										callback.apply(null,
+											Array.prototype.slice.call(arguments, 4)
+												.concat(wallCollision));
+									}
+								}
+							}
+						}
+
+						return collisions;
+					},
+					checkEntity: function(entity, other) {
+						var collision = Collision.Shape.checkShape(entity.shape,
+								other.shape);
+
+						if(collision) {
+							collision.self = entity;
+							collision.other = other;
+						}
+
+						return collision;
+					},
+					checkWall: function(entity, other) {
+						var collision = Collision.Shape.checkWall(entity.shape,
+								other);
+
+						if(collision) { collision.self = entity; }
+
+						return collision;
+					},
+					resolveLumens: function(collision) {
+						var self = collision.self;
+
+						if(collision.other.toroid) {
+							var s = collision.other.boundRect.size;
+
+							if(self.pos.x < 0) { self.pos.x = self.pos.x%s.x+s.x; }
+							else if(self.pos.x > s.x) { self.pos.x = self.pos.x%s.x-s.x; }
+							
+							if(self.pos.y < 0) { self.pos.y = self.pos.y%s.y+s.y; }
+							else if(self.pos.y > s.y) { self.pos.y = self.pos.y%s.y-s.y; }
+						}
+						else {
+							self.vel.doAdd(Impulse.collision({
+								dt: collision.dt, normal: collision.normal,
+								restitution: self.restitution, point1: self
+							}));
+							self.pos.doAdd(Move.penetration({
+								normal: collision.normal,
+								penetration: collision.penetration, point1: self
+							}));
+						}
+
+						var shapeCollision = $.extend({}, collision,
+							{ self: self.shape });
+
+						Collision.Shape.resolveLumens(shapeCollision);
+
+						return this;
+					},
+					resolveEntity: function(collision) {
+						var self = collision.self, other = collision.other,
+							impulses = Impulse.collision({
+								dt: collision.dt, normal: collision.normal,
+								restitution: self.restitution,
+								point1: self, point2: other
+							}),
+							moves = Move.penetration({
+								normal: collision.normal,
+								penetration: collision.penetration,
+								point1: self, point2: other
+							});
+
+						self.vel.doAdd(impulses[0]);
+						self.pos.doAdd(moves[0]);
+
+						other.vel.doAdd(impulses[1]);
+						other.pos.doAdd(moves[1]);
+
+						var shapeCollision = $.extend({}, collision,
+							{ self: self.shape, other: other.shape });
+
+						Collision.Shape.resolveShape(shapeCollision);
+
+						self.updateTreeItem();
+						other.updateTreeItem();
+
+						return this;
+					},
+					resolveWall: function(collision) {
+						var self = collision.self;
+
+						self.vel.doAdd(Impulse.collision({
+							dt: collision.dt, normal: collision.normal,
+							restitution: self.restitution, point1: self
+						}));
+						self.pos.doAdd(Move.penetration({
+							normal: collision.normal,
+							penetration: collision.penetration, point1: self
+						}));
+
+						var shapeCollision = $.extend({}, collision,
+							{ self: self.shape });
+
+						Collision.Shape.resolveWall(shapeCollision);
+
+						return this;
+					}
+				},
+				Viewport: {
+					checkLumens: function(viewport, lumens, dt, callback, args) {
+						var collision = Collision.Lumens.checkRect(lumens,
+								viewport.boundRect);
+
+						if(collision) {
+							collision.dt = dt;
+							collision.doSwap().self = viewport;
+							this.resolveLumens(collision);
+
+							if(callback) {
+								callback.apply(null,
+									Array.prototype.slice.call(arguments, 3)
+										.concat(collision));
+							}
+						}
+
+						return collision;
+					},
+					resolveLumens: function(collision) {
+						collision.self.pos.doAdd(Move.penetration({
+							normal: collision.normal,
+							penetration: collision.penetration,
+							point1: collision.self
+						}));
+						collision.self.reposition();
+
+						return this;
+					}
+				},
+				Lumens: {
+					checkRect: function(lumens, other) {
+						var collision = null;
+
+						if(lumens !== other && !lumens.boundRect.contains(other)) {
+							var s = lumens.boundRect.size,
+
+								/* In the case that the rect is larger than lumens
+									boundRect, it should be centered */
+								margin = new Vec2D(Math.max((other.size.x-s.x)/2, 0),
+									Math.max((other.size.y-s.y)/2, 0)),
+								
+								normal = new Vec2D(Math.min(other.pos.x, -margin.x)+
+										Math.max((other.pos.x+other.size.x)-s.x, margin.x),
+									Math.min(other.pos.y, -margin.y)+
+										Math.max((other.pos.y+other.size.y)-s.y, margin.y)),
+
+								penetration = normal.mag();
+
+							if(penetration) {
+								collision = new Collision(lumens, other,
+									normal.doScale(1/penetration), penetration);
+							}
+						}
+
+						return collision;
+					}
+				}
+			});
+	//	}
+
+
+	//	INFLUENCES {
+			var Force = {
+				/* See Game Physics Engine Development, by Ian Millington */
+				// { Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target) }
+				spring: function(options) {
+					var force = options.posTo.sub(options.posFrom),
+						length = force.mag();
+					
+					return ((length)? force.doScale(options.factor*
+							Math.abs(length-options.restLength)/length)
+						:	force);
+				},
+				// { Particle pointFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target), Number damping }
+				dampedSpring: function(options) {
+					var from = options.pointFrom.pos, oldFrom = options.posFrom;
+
+					options.posFrom = from;
+
+					var spring = this.spring(options), damp;
+
+					if(from.equals(options.posTo)) {
+						damp = options.pointFrom.vel.scale(-options.damping);
+					}
+					else {
+						damp = from.sub(options.posTo).doUnit();
+						damp.doScale(-options.damping*Math.max(0,
+							options.pointFrom.vel.dot(damp)));
+					}
+
+					delete options.posFrom;
+					options.posFrom = oldFrom;
+
+					return damp.doAdd(spring);
+				},
+				/* Adapted from "How To Implement a Pressure Soft Body
+					Model", by Maciej Matyka, using Gauss' theorem to obtain volume,
+					and pressure from there - maq@panoramix.ift.uni.wroc.pl */
+				/* A bit different to the others, in that it doesn't return a force to
+					be applied to each point in turn, but rather applies it across
+					all of the points in turn */
+				applyPressure: function(points, factor) {
+					// Derived used to prevent repeated calculations
+					var volume = 0, derived = [];
+
+					for(var p = 0; p < points.length; ++p) {
+						var from = points.wrap(p-1), to = points[p],
+							vec = to.pos.sub(from.pos),
+							mag = vec.mag();
+
+						if(mag) {
+							var normal = vec.perp().doScale(1/mag);
+							
+							volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
+							derived.push({ from: from, to: to, mag: mag, normal: normal});
+						}
+					}
+
+					var invVolume = 1/volume;
+					for(var d = 0; d < derived.length; ++d) {
+						var data = derived[d],
+							pressure = invVolume*factor*data.mag;
+						
+						data.from.force.doAdd(data.normal.scale(pressure));
+						data.to.force.doAdd(data.normal.scale(pressure));
+					}
+				},
+				// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
+				// { Number range, Vec2D vel }
+				wander: function(options) {
+					/* range is proportional to the distance either side of the current
+						heading within which the entity may wander (radius of wander circle)
+						vel is the minimum velocity vector which wandering may produce
+						(distance wander circle is ahead of the entity) */
+					var angle = Math.random()*2*Math.PI;
+					return options.vel.add(new Vec2D(options.range*Math.cos(angle),
+						options.range*Math.sin(angle)));
+				},
+				/* Adapted from Craig Reynolds' famous Boids - http://www.red3d.com/cwr/boids/
+					and Harry Brundage's implementation, among others - http://harry.me/2011/02/17/neat-algorithms---flocking */
+				// { QuadTree swarm, Particle member, Number nearbyRad, { Number separation, Number alignment, Number cohesion } weight, Number predict (o) }
+				swarm: function(options) {
+					var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
+						totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
+						
+						predict = (options.predict || 0),
+						focus = options.member.vel.scale(predict)
+							.doAdd(options.member.pos),
+						nearby = options.swarm.get((new Circle(focus,
+								options.nearbyRad)).containingAARect()),
+						
+						num = 0;
+					
+					for(var n = 0; n < nearby.length; ++n) {
+						var near = nearby[n].item;
+						
+						if(options.member !== near) {
+							var nearbyFocus = near.vel.scale(predict)
+									.doAdd(near.pos),
+								vec = focus.sub(nearbyFocus),
+								dist = vec.mag();
+
+							if(dist < options.nearbyRad) {
+								++num;
+
+								var distFactor = options.nearbyRad/dist;
+								totalSeparation.doAdd(vec.doUnit()
+									.doScale(distFactor*distFactor));
+								
+								totalCohesion.doAdd(nearbyFocus).doSub(focus);
+								
+								var alignment = (near.angle ||
+									((near.vel.magSq())?
+										near.vel.unit() : null));
+								
+								if(alignment) { totalAlignment.doAdd(alignment); }
+							}
+						}
+					}
+					
+					if(num) {
+						swarmForce.doAdd(totalSeparation.doScale(options.weight.separation))
+							.doAdd(totalCohesion.doScale(options.weight.cohesion))
+							.doAdd(totalAlignment.doScale(options.weight.alignment))
+							.doScale(1/num);
+					}
+					
+					return swarmForce;
+				},
+				// { Particle point, QuadTree walls, Number radius, Number predict }
+				avoidWalls: function(options) {
+					var force = new Vec2D(),
+						predict = (options.predict || 0),
+						focus = new Circle(options.point.vel.scale(predict)
+								.doAdd(options.point.pos), options.radius);
+
+					for(var w = 0, nearby = options.walls.get(focus.containingAARect());
+						w < nearby.length; ++w) {
+						var wall = nearby[w].item;
+
+						if(wall.boundRad.intersects(focus)) {
+							for(var p = 0; p < wall.points.length; ++p) {
+								var a = wall.points.wrap(p-1).pos,
+									b = wall.points[p].pos,
+									c = Collision.Circle.checkLine(focus, a, b);
+
+								if(c) {
+									force.doAdd(c.normal
+										.doScale(c.penetration*c.penetration));
+								}
+							}
+						}
+					}
+
+					return force;
+				}
+			};
+
+
+			Impulse = {
+				/* See Game Physics Engine Development, by Ian Millington */
+				/* { Number dt, Vec2D normal, Number restitution, Particle point1, Particle point2 o } */
+				collision: function(options) {
+					var impulse = new Vec2D();
+
+					if(options.restitution) {
+						var relVel = options.point1.vel.copy();
+
+						if(options.point2) { relVel.doSub(options.point2.vel); }
+
+						var sepVel = relVel.dot(options.normal);
+
+						if(sepVel <= 0) {
+							var closeVel = -sepVel*options.restitution,
+								relAcc = options.point1.acc.copy();
+
+							if(options.point2) { relAcc.doSub(options.point2.acc); }
+
+							var accSepVel = relAcc.dot(options.normal)*options.dt;
+
+							if(accSepVel < 0) {
+								closeVel = Math.max(closeVel+accSepVel*
+									options.restitution, 0);
+							}
+
+							var deltaVel = closeVel-sepVel,
+								totalInvMass = options.point1.invMass;
+
+							if(options.point2) {
+								totalInvMass += options.point2.invMass;
+							}
+
+							if(totalInvMass > 0) {
+								impulse = options.normal.scale(deltaVel/totalInvMass);
+
+								var point1Impulse =
+									impulse.scale(options.point1.invMass);
+
+								return ((options.point2)?
+										[point1Impulse,
+											impulse.scale(-options.point2.invMass)]
+									:	point1Impulse);
+							}
+						}
+					}
+
+					return ((options.point2)? [impulse, impulse] : impulse);
+				}
+			};
+
+
+			Move = {
+				/* { Vec2D normal, Number penetration, Particle point1, Particle point2 o } */
+				penetration: function(options) {
+					var move = new Vec2D();
+
+					if(options.penetration > 0) {
+						var totalInvMass = options.point1.invMass;
+
+						if(options.point2) { totalInvMass += options.point2.invMass; }
 
 						if(totalInvMass > 0) {
-							impulse = options.normal.scale(deltaVel/totalInvMass);
+							move = options.normal.scale(options.penetration/totalInvMass);
 
-							var point1Impulse =
-								impulse.scale(options.point1.invMass);
+							var point1Move = move.scale(options.point1.invMass);
 
 							return ((options.point2)?
-									[point1Impulse,
-										impulse.scale(-options.point2.invMass)]
-								:	point1Impulse);
+									[point1Move, move.scale(-options.point2.invMass)]
+								:	point1Move);
 						}
 					}
+
+					return ((options.point2)? [move, move] : move);
 				}
-
-				return ((options.point2)? [impulse, impulse] : impulse);
-			}
-		};
-
-
-		Move = {
-			/* { Vec2D normal, Number penetration, Particle point1, Particle point2 o } */
-			penetration: function(options) {
-				var move = new Vec2D();
-
-				if(options.penetration > 0) {
-					var totalInvMass = options.point1.invMass;
-
-					if(options.point2) { totalInvMass += options.point2.invMass; }
-
-					if(totalInvMass > 0) {
-						move = options.normal.scale(options.penetration/totalInvMass);
-
-						var point1Move = move.scale(options.point1.invMass);
-
-						return ((options.point2)?
-								[point1Move, move.scale(-options.point2.invMass)]
-							:	point1Move);
-					}
-				}
-
-				return ((options.point2)? [move, move] : move);
-			}
-		};
+			};
+	//	}
 
 
 		// Pointlight
@@ -1036,14 +1648,14 @@
 		});
 
 
-		// SHAPES {
+	//	SHAPES {
 			// No orientation - just position (bound to particle)
 			function Shape(options) {
 				if(!options) { options = {}; }
 				
-				this.centerPoint = (options.centerPoint || new Particle());
+				this.owner = (options.owner || new Particle());
 
-				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape - positions relative to centerPoint.pos
+				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape - positions relative to owner.pos
 				
 				/* Visual information goes in here
 					TODO: patterns, images, etc */
@@ -1053,16 +1665,17 @@
 				this.filled = ((options.filled !== undefined)? options.filled : true);
 				
 				this.boundRad = new Circle();
+				this.treeItem = null;
 				this.updateBounds();
 			}
 			$.extend(Shape.prototype, {
 				update: function() { return this; },
 				resolve: function(dt) {
-					/* For positions not relative to centerPoint.pos *//*
-					var last = this.centerPoint.trail[0];
+					/* For positions not relative to owner.pos *//*
+					var last = this.owner.trail[0];
 
-					if(last && !this.centerPoint.pos.equals(last)) {
-						var move = this.centerPoint.pos.sub(last);
+					if(last && !this.owner.pos.equals(last)) {
+						var move = this.owner.pos.sub(last);
 
 						for(var p = 0; p < this.points.length; ++p) {
 							this.points[p].updateTrail(dt).pos.doAdd(move);
@@ -1096,6 +1709,9 @@
 						
 						this.boundRad.rad = Math.sqrt(this.boundRad.radSq);
 					}
+
+					this.treeItem = this.boundRad.containingAARect();
+					this.treeItem.item = this;
 					
 					return this;
 				},
@@ -1120,13 +1736,8 @@
 
 					return this;
 				},
-				relPos: function(globPos) { return globPos.sub(this.centerPoint.pos); },
-				globPos: function(relPos) { return this.centerPoint.pos.add(relPos); },
-				treeItem: function() {
-					var treeItem = this.boundRad.containingAARect();
-					treeItem.item = this;
-					return treeItem;
-				}
+				relPos: function(globPos) { return globPos.sub(this.owner.pos); },
+				globPos: function(relPos) { return this.owner.pos.add(relPos); }
 			});
 
 			
@@ -1138,7 +1749,7 @@
 
 				/* [{ Particle pointFrom, Vec2D posFrom, Particle pointTo, Vec2D posTo, Number factor, Number restLength }] */
 				this.edges = (($.isArray(options.edges))? options.edges : []);	// The edge of the shape - may be repeated
-				this.ties = (($.isArray(options.ties))? options.ties : []);	// Other ties, such as to cenetMass - may be repeated, usually one-to-one between each point and centerPoint
+				this.ties = (($.isArray(options.ties))? options.ties : []);	// Other ties, such as to cenetMass - may be repeated, usually one-to-one between each point and owner
 
 				this.pressureFactor = (options.pressureFactor || 0.005);
 			}
@@ -1163,11 +1774,11 @@
 						this.points[p].resolve(dt);
 					}*/
 					// Offset from relative center
-					var last = this.centerPoint.trail[0],
+					var last = this.owner.trail[0],
 						resolve;
 
-					if(last && !this.centerPoint.pos.equals(last)) {
-						var moveRel = this.centerPoint.pos.sub(last);
+					if(last && !this.owner.pos.equals(last)) {
+						var moveRel = this.owner.pos.sub(last);
 
 						resolve = function(point) {
 							point.pos.doSub(moveRel);
@@ -1248,7 +1859,7 @@
 				if(!options) { options = {}; }
 				
 				/* Call super constructor
-					Note: this expects a body as centerPoint, not a particle */
+					Note: this expects a body as owner, not a particle */
 				Shape.call(this, options);
 			}
 			$.extend(inherit(BodyShape, Shape).prototype);
@@ -1260,10 +1871,10 @@
 				BodyShape.call(this, options);
 			}
 			$.extend(inherit(SoftBodyShape, BodyShape).prototype);
-		// }
-	// }
+	//	}
+//	}
 	
-	// ENTITIES {
+//	ENTITIES {
 		/* Template class */
 		function Entity(Type, options) {
 			if(!options) { options = {}; }
@@ -1281,13 +1892,12 @@
 			this.maxTorque = (options.maxTorque || 1.0);
 
 			this.restitution = (options.restitution || 0.4);
-			this.maxRechecks = (options.maxRechecks || 3);
-			this.rechecks = 0;
+
+			this.treeItem = null;
 		}
 		$.extend(Entity.prototype, {
 			update: function() {
 				this.shape.update();
-				this.rechecks = 0;
 
 				return this;
 			},
@@ -1295,205 +1905,64 @@
 				if(dt) {
 					this.Type.prototype.resolve.call(this, dt);
 					this.shape.resolve(dt);
+					this.updateTreeItem();
 				}
 				
 				return this;
 			},
-			treeItem: function() {
-				var treeItem = this.shape.treeItem();
-				treeItem.item = this;
-				return treeItem;
-			},
-			// colliders: { QuadTree entities, Lumens environment, QuadTree walls }
-			collisions: function(dt, colliders, callback, args) {
-				var collisions = [],
-					treeItem = this.treeItem();
-
-				if(colliders.entities) {
-					for(var neighbours = colliders.entities.get(treeItem), n = 0;
-						n < neighbours.length; ++n) {
-						var neighbour = neighbours[n];
-
-						if(neighbour.intersects(treeItem)) {
-							var entityCollision = this.collision(dt, neighbour.item);
-							
-							if(entityCollision) {
-								collisions.push(entityCollision);
-								
-								if(callback) {
-									callback.apply(null,
-										Array.prototype.slice.call(arguments, 3)
-											.concat(entityCollision, colliders));
-								}
-							}
-						}
-					}
-				}
-
-				if(colliders.environment) {
-					if(!colliders.environment.boundRect.contains(treeItem)) {
-						var envCollision = colliders.environment.collision(dt, treeItem);
-
-						if(envCollision) {
-							collisions.push(envCollision);
-							
-							if(callback) {
-								callback.apply(null,
-									Array.prototype.slice.call(arguments, 3)
-										.concat(envCollision, colliders));
-							}
-						}
-					}
-				}
-
-				if(colliders.walls) {
-					for(var walls = colliders.walls.get(treeItem), w = 0;
-						w < walls.length; ++w) {
-						var wall = walls[w];
-
-						if(false) {
-							for(var p = 0; p < wall.points.length; ++p) {
-								var edge = wall.points[p].pos
-										.sub(wall.points.wrap(p-1).pos),
-									normal = edge.perp();
-							}
-						}
-					}
-				}
-
-				return collisions;
-			},
-			collision: function(dt, other) {
-				var collision = null,
-					otherShape = other.shape, shape = this.shape;
-
-				if(otherShape.boundRad.intersects(shape.boundRad)) {
-					//  TODO: narrow collision detection
-					var normal = shape.centerPoint.pos
-							.sub(otherShape.centerPoint.pos),
-						norMag = normal.mag(),
-						penetration =
-							(shape.boundRad.rad+otherShape.boundRad.rad)-norMag;
-
-					if(!norMag) {
-						//log("Entity Collision Warning: entities have the same center", this, other);
-					}
-					else if(penetration > 0) {
-						collision = {
-							object: other,
-							normal: normal.doScale(1/norMag),
-							penetration: penetration,
-							/* TODO: set this to be the time passed since
-								the time of the collision */
-							dt: dt
-						};
-					}
-				}
-
-				return collision;
-			},
-			resolveCollision: function(collision, colliders) {
-				if(instance(collision.object, Lumens)) {
-					if(collision.object.toroid) { this.wrap(collision.object); }
-					else {
-						this.vel.doAdd(Impulse.collision({
-							dt: collision.dt, normal: collision.normal,
-							restitution: this.restitution, point1: this
-						}));
-						this.pos.doAdd(Move.penetration({
-							normal: collision.normal,
-							penetration: collision.penetration, point1: this
-						}));
-
-						this.recheckCollisions(collision.dt, colliders,
-							invoke, this, this.resolveCollision);
-					}
-				}
-				else if(instance(collision.object, Entity)) {
-					var impulses = Impulse.collision({
-							dt: collision.dt, normal: collision.normal,
-							restitution: this.restitution,
-							point1: this, point2: collision.object
-						}),
-						moves = Move.penetration({
-							normal: collision.normal,
-							penetration: collision.penetration,
-							point1: this, point2: collision.object
-						});
-
-					this.vel.doAdd(impulses[0]);
-					this.pos.doAdd(moves[0]);
-
-					collision.object.vel.doAdd(impulses[1]);
-					collision.object.pos.doAdd(moves[1]);
-
-					this.recheckCollisions(collision.dt, colliders,
-						invoke, this, this.resolveCollision);
-					collision.object.recheckCollisions(collision.dt, colliders,
-						invoke, collision.object, collision.object.resolveCollision);
-				}
+			updateTreeItem: function() {
+				this.treeItem = this.shape.treeItem.copy();
+				this.treeItem.item = this;
 
 				return this;
-			},
-			recheckCollisions: function(dt, colliders, callback, args) {
-				if(this.rechecks++ < this.maxRechecks) {
-					this.collisions.apply(this, arguments);
-				}
-
-				return this;
-			},
-			wrap: function(environment) {
-				var s = environment.boundRect.size;
-
-				while(this.pos.x < 0) { this.pos.x += s.x; }
-				while(this.pos.x > s.x) { this.pos.x -= s.x; }
-				
-				while(this.pos.y < 0) { this.pos.y += s.y; }
-				while(this.pos.y > s.y) { this.pos.y -= s.y; }
 			}
 		});
-		Entity.inherit = function(Type, deep) {
-			function EntityTemplate() {}
+		$.extend(Entity, {
+			inherit: function(Type, deep) {
+				function EntityTemplate() {}
 
-			inherit(EntityTemplate, Entity);
-			
-			var typeInheritance = [EntityTemplate.prototype,
-				Type.prototype, Entity.prototype];
+				inherit(EntityTemplate, Entity);
+				
+				var typeInheritance = [EntityTemplate.prototype,
+					Type.prototype, Entity.prototype];
 
-			if(deep) { typeInheritance.unshift(deep); }
+				if(deep) { typeInheritance.unshift(deep); }
 
-			$.extend.apply($, typeInheritance);
+				$.extend.apply($, typeInheritance);
 
-			return EntityTemplate;
-		};
-		Entity.states = new Enum("spawn", "normal", "dead");
+				return EntityTemplate;
+			},
+			states: new Enum("spawn", "normal", "dead")
+		});
 		
 
 		function Firefly(options) {
-			if(!options) { options = {}; }
+			settings = $.extend(true, {}, Firefly.settings, options);
 			
 			/* Particle entity template */
 			/* TODO: change to Body */
-			Entity.call(this, Particle, options);
+			Entity.call(this, Particle, settings);
 			
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
-			var points = [];
+			var points = [], num = 10, mass = settings.mass/num;
 			Circle.generateVecs(10, 15, invoke, this, function(pos) {
-				points.push(new Particle({ pos: pos, invMass: this.invMass }));
+				points.push(new Particle({ pos: pos, mass: mass }));
 			});
 
-			/*this.shape = (new SoftShape({ centerPoint: this,
+			/*this.shape = (new SoftShape({ owner: this,
 					color: Color.fromRGBA(200, 200, 200, 0.7) })
 				.setupSurface(points, 0.0001, 0.001));*/
 
-			this.shape = new Shape({ centerPoint: this, points: points,
+			this.shape = new Shape({ owner: this, points: points,
 					color: Color.fromRGBA(200, 200, 200, 0.7) });
 			
-			this.light = new Light($.extend(true, { rad: 50, pos: this.pos,
-				color: Color.fromRGBA(255, 255, 255, 0.75) }, options.light));
+			settings.light.pos = this.pos;
+			this.light = new Light(settings.light);
 			
 			this.inputForce = null;
+
+			this.updateTreeItem();
 		}
 		$.extend(inherit(Firefly, Entity.inherit(Particle)).prototype, {
 			resolve: function(dt) {
@@ -1525,37 +1994,39 @@
 				return this;
 			}
 		});
-		Firefly.states = $.extend({}, Entity.states,
-			new Enum("wander", "transition"));
+		$.extend(Firefly, {
+			states: $.extend({}, Entity.states, new Enum("wander", "transition")),
+			settings: { mass: 10, light: { rad: 100 } }
+		});
 		
 
 		function Predator(options) {
-			if(!options) { options = {}; }
+			var settings = $.extend(true, {}, Predator.settings, options);
 			
 			/* Particle entity template */
 			/* TODO: change to Body */
-			Entity.call(this, Particle, options);
-
-			this.wanderForce = $.extend({ range: 0.6, minSpeed: 0.01,
-				vel: new Vec2D(), weight: 1 }, options.wanderForce);
-			
-			this.swarmForce = $.extend({ swarm: null, member: this, predict: 0,
-				neighbourRad: 90, weight: null }, options.swarmForce);
-			this.swarmForce.weight = $.extend({ separation: 0.401,
-				cohesion: 0.021, alignment: 1.001 });
+			Entity.call(this, Particle, settings);
 			
 			/* Set up the shape */
 			/* TODO: change to BodyShape */
-			var points = [];
-			Circle.generateVecs(8, 7, invoke, this, function(pos) {
-				points.push(new Particle({ pos: pos, invMass: this.invMass }));
+			var points = [], num = 8, mass = settings.mass/num;
+			Circle.generateVecs(num, 7, invoke, this, function(pos) {
+				points.push(new Particle({ pos: pos, mass: mass }));
 			});
 
-			this.shape = (new Shape({ centerPoint: this, points: points,
+			this.shape = (new Shape({ owner: this, points: points,
 					color: Color.fromRGBA(250, 200, 200, 0.7) }));
 				//.setupSurface(points, 0.008);
+
+			this.wanderForce = settings.wanderForce;
+			
+			settings.swarmForce.member = settings.avoidForce.point = this;
+			this.swarmForce = settings.swarmForce;
+			this.avoidForce = settings.avoidForce;
 			
 			this.state = Predator.states.spawn;
+
+			this.updateTreeItem();
 		}
 		$.extend(inherit(Predator, Entity.inherit(Particle)).prototype, {
 			update: function() {
@@ -1576,15 +2047,21 @@
 						swarmWeights = swarmWeight.separation+swarmWeight.cohesion+
 							swarmWeight.alignment,
 						wanderWeight = this.wanderForce.weight,
-						sumWeights = wanderWeight+swarmWeights,
+						avoidWeight = this.avoidForce.weight,
+						sumWeights = swarmWeights+wanderWeight+avoidWeight,
 
 						swarm = Force.swarm(this.swarmForce),
 						wander = Force.wander(this.wanderForce)
-							.doScale(wanderWeight);
+							.doScale(wanderWeight),
+						avoid = Force.avoidWalls($.extend({}, this.avoidForce,
+							{ radius: this.shape.boundRad.rad+this.avoidForce.radius }));
 					
-					this.force.doAdd(swarm
-						.doPinToRange(0, swarmWeights/sumWeights*this.maxForce))
-						.doAdd(wander.doPinToRange(0, wanderWeight/sumWeights*this.maxForce));
+					this.force.doAdd(swarm.doPinToRange(0,
+							swarmWeights/sumWeights*this.maxForce))
+						.doAdd(wander.doPinToRange(0,
+							wanderWeight/sumWeights*this.maxForce))
+						.doAdd(avoid.doPinToRange(0,
+							avoidWeight/sumWeights*this.maxForce));
 				break;
 				
 				default:
@@ -1594,190 +2071,81 @@
 				return Entity.prototype.update.call(this);
 			}
 		});
-		Predator.states = $.extend({}, Entity.states,
-			new Enum("passive", "aggressive", "feeding", "stunned"));
-	// }
+		$.extend(Predator, {
+			states: $.extend({}, Entity.states,
+				new Enum("passive", "aggressive", "feeding", "stunned")),
+			settings: {
+				mass: 6,
+				swarmForce: {
+					swarm: null, nearbyRad: 90, predict: 0.6,
+					weight: { separation: 0.501,
+						cohesion: 0.021, alignment: 0.414 }
+				},
+				wanderForce: { vel: new Vec2D(), range: 0.6,
+					minSpeed: 0.8, weight: 1.501 },
+				avoidForce: { point: null, walls: null, radius: 70,
+					predict: 0.8, weight: 0.5 },
+				maxForce: 0.006
+			}
+		});
+//	}
 
-	// ENVIRONMENT {
+//	ENVIRONMENT {
 		function Wall(points, color) {
 			Shape.call(this, { points: (points || []),
 				color: (color || new Color(0, 0.5, 1, 0.1)) });
 		}
 		inherit(Wall, Shape);
-	// }
-	
-	// DEBUG {
-		/* GUI for testing */
-		function addGUI(lumens) {
-			var gui = new dat.GUI({ load: lumens.settings, preset: 'Lumens' });
+//	}
 
-			gui.remember('Lumens');
-
-			gui.add(lumens, "frameRate", 0, 0).listen();
-
-			var playerFolder = gui.addFolder("Player"),
-				predatorFolder = gui.addFolder("Predators"),
-				viewportFolder = gui.addFolder("Viewport"),
-				environmentFolder = gui.addFolder("Environment"),
-
-				/* Note that the alpha can't be 1 to work with dat.GUI */
-				player = { color: lumens.player.shape.color.toRGBA() },
-				light = { color: lumens.player.light.color.toRGBA() };
-			
-			playerFolder.addColor(player, "color").onChange(function(c) {
-				lumens.player.shape.color.fromRGBA(c.r, c.g, c.b, c.a);
-			});
-			playerFolder.add(lumens.player, 'maxForce', 0.01, 1.01).step(0.01).listen();
-			playerFolder.add(lumens.player, 'damping', 0.001, 1.000).step(0.001).listen();
-
-			var lightFolder = playerFolder.addFolder("Light");
-
-			lightFolder.add(lumens.player.light, "rad", 0, 1000).listen();
-			lightFolder.addColor(light, "color").onChange(function(c) {
-				lumens.player.light.color.fromRGBA(c.r, c.g, c.b, c.a);
-			});
-
-			var predSett = lumens.settings.predators;
-
-			predatorFolder.add(predSett, "num", 0, 2000).listen()
-			.onChange(function(num) {
-				predSett.num = num |= 0;
-
-				while(num < lumens.swarm.source.length) {
-					var i = (Math.random()*(lumens.swarm.source.length-1)) | 0;
-					lumens.removePredator(lumens.swarm.source[i]);
-				}
-				while(num > lumens.swarm.source.length) { lumens.addPredator(); }
-			});
-
-			var AIFolder = predatorFolder.addFolder("AI");
-
-			function setWeight(weight, influence) {
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].swarmForce.weight[influence] = weight;
-				}
-			}
-
-			AIFolder.add(predSett.options.swarmForce.weight, "separation",
-			0, 1).step(0.001).listen().onChange(function(weight) {
-				setWeight(weight, "separation");
-			});
-			AIFolder.add(predSett.options.swarmForce.weight, "cohesion",
-			0, 1).step(0.001).listen().onChange(function(weight) {
-				setWeight(weight, "cohesion");
-			});
-			AIFolder.add(predSett.options.swarmForce.weight, "alignment",
-			0, 1).step(0.001).listen().onChange(function(weight) {
-				setWeight(weight, "alignment");
-			});
-
-			AIFolder.add(predSett.options.swarmForce, "predict",
-			0, 5).step(0.001).listen().onChange(function(predict) {
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].swarmForce.predict = predict;
-				}
-			});
-
-			var wander = predSett.options.wanderForce,
-				wanderSettings = { wander: wander.weight, minSpeed: wander.minSpeed };
-
-			AIFolder.add(wanderSettings, "wander", 0, 10).step(0.001)
-			.onChange(function(weight) {
-				wander.weight = weight;
-
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].wanderForce.weight = weight;
-				}
-			});
-			AIFolder.add(wanderSettings, "minSpeed", 0, 10).step(0.001)
-			.onChange(function(speed) {
-				wander.minSpeed = speed;
-
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].wanderForce.minSpeed = speed;
-				}
-			});
-			
-			AIFolder.add(predSett.options.swarmForce, "neighbourRad", 0, 1000)
-			.step(0.05).listen().onChange(function(rad) {
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].swarmForce.neighbourRad = rad;
-				}
-			});
-			
-			AIFolder.add(predSett.options, "maxForce", 0, 1)
-			.step(0.005).listen().onChange(function(maxForce) {
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].maxForce = maxForce;
-				}
-			});
-
-			for(var s in lumens.viewport.settings) {
-				viewportFolder.add(lumens.viewport.settings, s);
-			}
-
-			viewportFolder.add(lumens.viewport.springForce, "damping", 0, 1);
-			viewportFolder.add(lumens.viewport.springForce, "factor", 0, 1);
-			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1);
-
-			environmentFolder.add(lumens.boundRect.size, "x").listen();
-			environmentFolder.add(lumens.boundRect.size, "y").listen();
-			environmentFolder.add(lumens, "toroid").listen();
-
-			//gui.close();
-
-			return gui;
-		}
-	// }
-
-	// VIEWPORT {
+//	VIEWPORT {
 		function Viewport(options) {
-			if(!options) { options = {}; }
+			var settings = $.extend(true, {}, Viewport.settings, options);
 
-			Particle.call(this, options);
+			Particle.call(this, settings);
 
 			/* The minimum bounds - defines the resolution and
 				behaviour upon resizes and reorientations, and
 				ensures that an area of this size is always visible,
 				with everything scaled to fit */
-			this.minRect = new AARect(this.pos, options.size);
+			this.minRect = new AARect(this.pos.copy(), settings.size);
 
 			/* The actual bounds - collisions done against the dimensions of
-				this when the respective environment dimension is larger */
+				this when the respective lumens dimension is larger */
 			this.boundRect = new AARect();
 
 			// TODO: replace with a Vec3D position (change z to zoom in/out)
-			this.zoomFactor = (options.zoomFactor || 1);
+			this.zoomFactor = (settings.zoomFactor || 1);
 
-			this.walls = new QuadTree(this.boundRect.copy(), 5, 4, options.walls);
-			this.shapes = new QuadTree(this.boundRect.copy(), 5, 8, options.shapes);
+			this.walls = new QuadTree(this.boundRect.copy(), 5, 4,
+					settings.walls, function(wall) { return wall.treeItem; });
+
+			this.shapes = new QuadTree(this.boundRect.copy(), 5, 8);
 			
-			this.$canvas = $(options.canvas);
+			this.$canvas = $(settings.canvas);
 			this.canvas = this.$canvas[0];
 			this.context = this.canvas.getContext('2d');
 
-			this.springForce = $.extend({ pointFrom: null, posTo: null,
-				factor: 0.004, restLength: 0, damping: 0.7 }, options.springForce);
+			settings.springForce.pointFrom = this;
+			this.springForce = settings.springForce;
 
-			this.restitution = (options.restitution || 0.75);
-
-			// Setup size and shapes
-			this.resolve();
+			this.restitution = (settings.restitution || 0.75);
 			
-			this.environment = (options.environment || null);
+			this.lumens = (settings.lumens || null);
 			// TODO: change all to trees
-			this.lights = (options.lights || []);
-			this.glows = (options.glows || []);
+			this.lights = (settings.lights || []);
+			this.glows = (settings.glows || []);
 
-			this.settings = $.extend(true, {
+			this.debug = $.extend(true, {
 				bounds: false,
 				trails: false,
 				health: false,
 				states: false,
-				tree: false
-			}, options.settings);
+				tree: false,
+				normals: false
+			}, settings.debug);
 
-			this.debugColor = (options.debugColor || new Color(0, 1, 0.3, 0.7));
+			this.debugColor = (settings.debugColor || new Color(0, 1, 0.3, 0.7));
 
 			this.renderDone = new Watchable();
 			//this.running = true;
@@ -1785,8 +2153,19 @@
 			/* In a render cycle, first update is called to clear and resize
 				the canvas, then the render-lists are populated, followed by a
 				call to render, which calls clear at the end */
+
+			this.resize().reposition();
 		}
 		$.extend(inherit(Viewport, Particle).prototype, {
+			resolve: function(dt) {
+				if(dt) {
+					Particle.prototype.resolve.call(this, dt);
+					this.resize();
+					this.reposition();
+				}
+
+				return this;
+			},
 			resize: function() {
 				/* Fit everything to the screen in question,
 					maintaining aspect ratio */
@@ -1803,57 +2182,18 @@
 			reposition: function() {
 				var margin = this.boundRect.size.sub(this.minRect.size).doScale(0.5);	// Could be made a member to prevent repeated calculations, but it doesn't really belong there
 
-				this.boundRect.pos.copy(this.pos.sub(margin));
-
-				return this;
-			},
-			resolve: function(dt) {
-				if(dt) {
-					Particle.prototype.resolve.call(this, dt);
-					this.reposition();
-				}
-
-				return this;
-			},
-			collisions: function(dt, callback, args) {
-				var collisions = [];
-				
-				if(this.environment) {
-					if(!this.environment.boundRect.contains(this.boundRect)) {
-						var collision = this.environment.collision(dt, this.boundRect);
-
-						if(collision) {
-							collisions.push(collision);
-							
-							if(callback) {
-								callback.apply(null,
-									Array.prototype.slice.call(arguments, 2)
-										.concat(collision));
-							}
-						}
-					}
-				}
-
-				return collisions;
-			},
-			resolveCollision: function(collision) {
-				this.pos.doAdd(Move.penetration({ normal: collision.normal,
-					penetration: collision.penetration, point1: this
-				}));
-				this.reposition();
+				this.minRect.pos.copy(this.pos.sub(this.minRect.size.scale(0.5)));
+				this.boundRect.pos.copy(this.minRect.pos.sub(margin));
 
 				return this;
 			},
 			update: function() {
 				var size = this.boundRect.size,
-					from = new Particle(this),
-					to = this.springForce.posTo;
+					to = this.springForce.posTo,
+					factor = this.springForce.factor;
 				
-				from.pos = this.pos.add(this.minRect.size.scale(0.5));
-				this.springForce.pointFrom = from;
-				
-				if(this.environment) {
-					var envSize = this.environment.boundRect.size,
+				if(this.lumens) {
+					var envSize = this.lumens.boundRect.size,
 						center = envSize.scale(0.5);
 
 					this.springForce.posTo =
@@ -1861,8 +2201,11 @@
 							((size.y >= envSize.y)? center.y : to.y));
 				}
 
+				this.springForce.factor *= this.zoomFactor;
+
 				this.force.doAdd(Force.dampedSpring(this.springForce));
 				this.springForce.posTo = to;
+				this.springForce.factor = factor;
 
 				return this;
 			},
@@ -1878,27 +2221,35 @@
 				// TODO: all trees
 				this.lights.length = this.glows.length = 0;
 				this.walls.clear();
-				this.shapes.clearAll();
+				this.shapes.clear(true);
 
-				this.walls = new QuadTree(this.boundRect.copy(), 5, 4, this.walls.source);
-				this.shapes = new QuadTree(this.boundRect.copy(), 5, 8);
+				this.walls.constructor(this.boundRect.copy(),
+					this.walls.root.maxDepth, this.walls.root.maxKids,
+					this.walls.source, function(wall) { return wall.treeItem; });
+				this.shapes.constructor(this.boundRect.copy(),
+					this.shapes.root.maxDepth, this.shapes.root.maxKids);
 
 				return this;
 			},
 			add: function(entity) {
-				var shapeTreeItem = entity.shape.treeItem();
+				if($.isArray(entity)) {
+					for(var e = 0; e < entity.length; ++e) { this.add(entity[e]); }
+				}
+				else {
+					var shapeTreeItem = entity.shape.treeItem;
 
-				if(this.boundRect.intersects(shapeTreeItem)) {
-					this.shapes.add(entity.shape).put(shapeTreeItem);
-				}
-				// TODO: change all to trees
-				if(entity.glow && this.boundRect
-					.intersects(entity.glow.containingAARect())) {
-					this.glows.push(entity.glow);
-				}
-				if(entity.light && this.boundRect
-					.intersects(entity.light.containingAARect())) {
-					this.lights.push(entity.light);
+					if(this.boundRect.intersects(shapeTreeItem)) {
+						this.shapes.add(entity.shape).put(shapeTreeItem);
+					}
+					// TODO: change all to trees
+					if(entity.glow && this.boundRect
+						.intersects(entity.glow.containingAARect())) {
+						this.glows.push(entity.glow);
+					}
+					if(entity.light && this.boundRect
+						.intersects(entity.light.containingAARect())) {
+						this.lights.push(entity.light);
+					}
 				}
 
 				return this;
@@ -1947,12 +2298,12 @@
 				this.context.globalCompositeOperation = 'source-over';
 				var visibleWalls = this.walls.get(this.boundRect);
 				for(var w = 0; w < visibleWalls.length; ++w) {
-					visibleWalls[w].render(this.context);
+					visibleWalls[w].item.render(this.context);
 				}
 
-				if(this.environment) {
+				if(this.lumens) {
 					this.context.globalCompositeOperation = 'destination-atop';
-					this.environment.render(this.context);
+					this.lumens.render(this.context);
 				}
 
 				this.renderDebug();
@@ -1979,8 +2330,8 @@
 
 				var renderFuncs = [];
 
-				if(this.settings.bounds) { renderFuncs.push(this.renderBoundRad); }
-				if(this.settings.trails) { renderFuncs.push(this.renderTrail); }
+				if(this.debug.bounds) { renderFuncs.push(this.renderBoundRad); }
+				if(this.debug.trails) { renderFuncs.push(this.renderTrail); }
 
 				for(var f = 0; f < renderFuncs.length; ++f) {
 					for(var s = 0; s < this.shapes.source.length; ++s) {
@@ -1988,7 +2339,8 @@
 					}
 				}
 
-				if(this.settings.tree) { this.renderShapeTree(); }
+				if(this.debug.tree) { this.renderShapeTree(); }
+				if(this.debug.normals) { this.renderNormals(); }
 
 				this.context.restore();
 			},
@@ -2002,7 +2354,7 @@
 				return this;
 			},
 			renderTrail: function(shape) {
-				var entity = shape.centerPoint;
+				var entity = shape.owner;
 
 				this.context.save();
 				//this.context.lineWidth = shape.boundRad.rad*2;
@@ -2036,6 +2388,35 @@
 				}).call(this, this.shapes.root);
 
 				return this;
+			},
+			renderNormals: function() {
+				this.context.save();
+				this.context.beginPath();
+
+				for(var w = 0; w < this.walls.source.length; ++w) {
+					var wall = this.walls.source[w];
+
+					for(var p = 0; p < wall.points.length; ++p) {
+						var a = wall.points.wrap(p-1).pos,
+							b = wall.points[p].pos,
+							edge = b.sub(a),
+							l = edge.mag();
+
+						if(l) {
+							var half = edge.scale(0.5),
+								center = a.add(half),
+								normal = edge.perp().doScale(15/l);
+
+							this.context.moveTo(center.x, center.y);
+							this.context.lineTo(center.x+normal.x, center.y+normal.y);
+						}
+					}
+				}
+
+				this.context.stroke();
+				this.context.restore();
+
+				return this;
 			}
 
 			/* When limiting this to within the edges of the environment, there
@@ -2043,9 +2424,14 @@
 				beyond that of the viewport - throw in something just to
 				show you thought of it... */
 		});
-	// }
+		Viewport.settings = {
+			size: new Vec2D(720, 720), mass: 200,
+			springForce: { pointFrom: null, posTo: null,
+				factor: 0.004, restLength: 0, damping: 0.7 }
+		};
+//	}
 	
-	// CONTROLLERS {
+//	CONTROLLERS {
 		function Controller(lumens) {
 			this.lumens = lumens;
 
@@ -2119,79 +2505,118 @@
 					ctrl.lumens.viewport.zoomFactor *= wheel;
 				},
 				'keydown.lumens': function(e) {
-					var ctrl = e.data.ctrl;
+					var ctrl = e.data.ctrl, caught = false;
 
 					switch(e.which) {
 					// left, a, j
-					case 37: case 65/*: case 74*/: ctrl.startMove(ctrl.moveKey.left);
+					case 37: case 65/*: case 74*/:
+						ctrl.startMove(ctrl.moveKey.left);
+						caught = true;
 					break;
 					
 					// right, d, l
-					case 39: case 68/*: case 76*/: ctrl.startMove(ctrl.moveKey.right);
+					case 39: case 68/*: case 76*/:
+						ctrl.startMove(ctrl.moveKey.right);
+						caught = true;
 					break;
 					
 					// up, w, i
-					case 38: case 87/*: case 73*/: ctrl.startMove(ctrl.moveKey.up);
+					case 38: case 87/*: case 73*/:
+						ctrl.startMove(ctrl.moveKey.up);
+						caught = true;
 					break;
 					
 					// down, s, k
-					case 40: case 83/*: case 75*/: ctrl.startMove(ctrl.moveKey.down);
+					case 40: case 83/*: case 75*/:
+						ctrl.startMove(ctrl.moveKey.down);
+						caught = true;
 					break;
 					
 					// space
-					case 32: ctrl.events.attack.thing(true); break;
+					case 32:
+						ctrl.events.attack.thing(true);
+						caught = true;
+					break;
 					
 					// x, m
-					case 88: case 77: ctrl.events.beam.thing(true); break;
+					case 88: case 77:
+						ctrl.events.beam.thing(true);
+						caught = true;
+					break;
 					
 					// c, n
-					case 67: case 78: ctrl.events.repel.thing(true); break;
+					case 67: case 78:
+						ctrl.events.repel.thing(true);
+						caught = true;
+					break;
 					
 					// v, b
-					case 86: case 66: ctrl.events.range.thing(true); break;
-					
-					// p, g, enter
-					case 80: case 71: case 13:
-						ctrl.events.pause.thing(!ctrl.events.pause.thing());
+					case 86: case 66:
+						ctrl.events.range.thing(true);
+						caught = true;
 					break;
 					
 					default: break;
 					}
+
+					return !caught;
 				},
 				'keyup.lumens': function(e) {
-					var ctrl = e.data.ctrl;
+					var ctrl = e.data.ctrl, caught = false;
 
 					switch(e.which) {
 					// left, a, j
-					case 37: case 65/*: case 74*/: ctrl.endMove(ctrl.moveKey.left);
+					case 37: case 65/*: case 74*/:
+						ctrl.endMove(ctrl.moveKey.left);
+						caught = true;
 					break;
 					
 					// right, d, l
-					case 39: case 68/*: case 76*/: ctrl.endMove(ctrl.moveKey.right);
+					case 39: case 68/*: case 76*/:
+						ctrl.endMove(ctrl.moveKey.right);
+						caught = true;
 					break;
 					
 					// up, w, i
-					case 38: case 87/*: case 73*/: ctrl.endMove(ctrl.moveKey.up);
+					case 38: case 87/*: case 73*/:
+						ctrl.endMove(ctrl.moveKey.up);
+						caught = true;
 					break;
 					
 					// down, s, k
-					case 40: case 83/*: case 75*/: ctrl.endMove(ctrl.moveKey.down);
+					case 40: case 83/*: case 75*/:
+						ctrl.endMove(ctrl.moveKey.down);
+						caught = true;
 					break;
 					
 					// space
-					case 32: ctrl.events.attack.thing(false); break;
+					case 32:
+						ctrl.events.attack.thing(false);
+						caught = true;
+					break;
 					
 					// x, m
-					case 88: case 77: ctrl.events.beam.thing(false); break;
+					case 88: case 77:
+						ctrl.events.beam.thing(false);
+						caught = true;
+					break;
 					
 					// c, n
-					case 67: case 78: ctrl.events.repel.thing(false); break;
+					case 67: case 78:
+						ctrl.events.repel.thing(false);
+						caught = true;
+					break;
 					
 					// v, b
-					case 86: case 66: ctrl.events.range.thing(false); break;
+					case 86: case 66:
+						ctrl.events.range.thing(false);
+						caught = true;
+					break;
 					
 					default: break;
 					}
+
+					return !caught;
 				}
 			},
 			startMove: function(key) {
@@ -2361,9 +2786,9 @@
 				}
 			}
 		});
-	// }
+//	}
 
-	// NETWORK {
+//	NETWORK {
 		Network = {
 			loadWalls: function(JSON) {
 				var walls = [];
@@ -2384,59 +2809,36 @@
 				return points;
 			}
 		};
-	// }
+//	}
 
-	// MAIN {
+//	MAIN {
 		/* Manages the application, and represents the environment
 			(for convenience) */
 		function Lumens(options) {
-			if(!options) { options = {}; }
+			var settings = $.extend(true, {}, Lumens.settings, options);
 
-			this.settings = $.extend(true, {
-				viewport: {
-					mass: 200, size: Lumens.minSize.copy(), environment: this,
-					springForce: {}
-				},
-				player: { mass: 10, light: { rad: 100 } },
-				// for testing - don't want to set it this way permanently
-				predators: {
-					num: 300,
-					options: {
-						mass: 6,
-						swarmForce: {
-							swarm: null, neighbourRad: 90, predict: 0.6,
-							weight: { separation: 0.601, cohesion: 0.0002, alignment: 0.01 }
-						},
-						wanderForce: { range: 0.6, minSpeed: 0.8, weight: 3.501 },
-						maxForce: 0.006
-					}
-				}
-			}, options);
+			this.boundRect = new AARect(null, settings.size);
+			this.color = (settings.color || new Color());
+			this.toroid = (settings.toroid || false);
 
-			this.boundRect = new AARect(null, (options.size || Lumens.minSize.copy()));
-			this.color = (options.color || new Color());
-			this.toroid = (options.toroid || false);
-
-			this.walls = new QuadTree(this.boundRect.copy(), 5, 8,
-				(options.walls || []));
-			this.entities = new QuadTree(this.boundRect.copy(), 5, 8,
-				(options.entities || []));
-			this.swarm = new QuadTree(this.boundRect.copy(), 5, 8,
-				(options.swarm || []));
+			this.walls = new QuadTree(this.boundRect.copy(), 5, 8, settings.walls,
+				function(wall) { return wall.treeItem; });
+			// TODO: remove entities - wasted second quadtree, no point
+			this.entities = new QuadTree(this.boundRect.copy(), 5, 8, settings.entities,
+				function(entity) { return entity.treeItem; });
+			this.swarm = new QuadTree(this.boundRect.copy(), 5, 8, settings.swarm,
+				function(predator) { return predator.treeItem; });
 			
-			this.settings.player.pos = this.boundRect.size.scale(0.5);
-			this.player = new Firefly(this.settings.player);
+			this.player = new Firefly({ pos: this.boundRect.size.scale(0.5) });
 			this.entities.add(this.player);
-
-			this.settings.predators.options.swarmForce.swarm = this.swarm;
 			
-			for(var p = 0; p < this.settings.predators.num; ++p) {
+			for(var p = 0; p < settings.predators.num; ++p) {
 				this.addPredator();
 			}
 
-			this.settings.viewport.springForce.posTo = this.player.pos;
-			this.settings.viewport.walls = this.walls.source;
-			this.viewport = new Viewport(this.settings.viewport);
+			this.viewport = new Viewport($.extend({
+				springForce: { posTo: this.player.pos }, walls: this.walls.source,
+				lumens: this, pos: this.player.pos.copy() }, settings.viewport));
 
 			this.controller = Controller.make(this);
 
@@ -2457,7 +2859,7 @@
 				this.viewport.shape ... this.entities;
 			}).call, this); */
 			
-			this.frameUpdate = (options.frameUpdate || 1000);
+			this.frameUpdate = (settings.frameUpdate || 1000);
 			this.frames = this.frameRate = 0;
 			this.time = Date.now();
 			this.state = Lumens.states.running;
@@ -2479,44 +2881,46 @@
 				
 				this.time = currentTime;
 
-				this.viewport.resize().resolve(dt)
-					.collisions(dt, invoke, this.viewport,
-						this.viewport.resolveCollision);
-
+				this.viewport.resolve(dt);
+				Collision.Viewport.checkLumens(this.viewport, this);
 				this.viewport.update();
-
 
 				if(this.state === Lumens.states.running) {
 					/* Clear the Quadtrees */
 					this.entities.clear();
 					this.swarm.clear();
 					
-					/* Resolve everything */
+					/* Resolve everything and populate Quadtrees */
 					for(var r = 0; r < this.entities.source.length; ++r) {
-						var entity = this.entities.source[r].resolve(dt);
+						var rE = this.entities.source[r].resolve(dt),
+							rTI = rE.treeItem;
 
-						entity.collisions(dt, {
-								entities: this.entities,
-								walls: this.walls,
-								environment: this
-							},
-							invoke, entity, entity.resolveCollision);
-
-						var treeItem = entity.treeItem();
+						this.entities.put(rTI);
 						
-						/* Populate Quadtrees */
-						this.entities.put(treeItem);
-						
-						if(instance(entity, Predator)) {
-							this.swarm.put(treeItem);
-						}
+						if(instance(rE, Predator)) { this.swarm.put(rTI); }
 					}
 
 					/* Update everything:
 						collision resolution, force accumulation,
 						anything querying the Quadtrees */
 					for(var u = 0; u < this.entities.source.length; ++u) {
-						this.entities.source[u].update(dt);
+						var uE = this.entities.source[u],
+							uTI = uE.treeItem,
+							predator = instance(uE, Predator);
+						
+						if(Collision.Entity.check(uE, { entities: this.entities,
+								walls: this.walls, lumens: this }, dt)
+							.length) {
+							this.entities.clear(uTI);
+							if(predator) { this.swarm.clear(uTI); }
+
+							// Get the new tree item
+							uTI = uE.treeItem;
+							this.entities.put(uTI);
+							if(predator) { this.swarm.put(uTI); }
+						}
+
+						uE.update(dt);
 					}
 				}
 
@@ -2527,13 +2931,7 @@
 					setTimeout(this.step.call, 1000/60, this);
 				} */
 
-				this.viewport.setup();
-
-				for(var v = 0; v < this.entities.source.length; ++v) {
-					this.viewport.add(this.entities.source[v]);
-				}
-
-				this.viewport.render();
+				this.viewport.setup().add(this.entities.source).render();
 
 				this.frames++;
 
@@ -2556,13 +2954,14 @@
 			},
 			addPredator: function() {
 				var angle = Math.random()*2*Math.PI,
-					predator = new Predator($.extend({},
-						this.settings.predators.options, {
+					predator = new Predator({
+							swarmForce: { swarm: this.swarm },
+							avoidForce: { walls: this.walls },
 							pos: new Vec2D(Math.random()*this.boundRect.size.x,
 								Math.random()*this.boundRect.size.y),
 							angle: new Vec2D(Math.cos(angle),
 									Math.sin(angle))
-						}));
+						});
 				
 				this.entities.add(predator);
 				this.swarm.add(predator);
@@ -2577,41 +2976,14 @@
 				return this;
 			},
 			generate: function() {
-				this.constructor($.extend(true, this.settings, {
-					size: new Vec2D(Lumens.minSize.x+
-							Lumens.minSize.x*Math.random()*Lumens.sizeRange.x,
-						Lumens.minSize.y+
-							Lumens.minSize.y*Math.random()*Lumens.sizeRange.y)
+				this.constructor($.extend(true, {
+					size: new Vec2D(Lumens.settings.size.x+Lumens.settings.size.x*
+							Math.random()*Lumens.settings.sizeRange.x,
+						Lumens.settings.size.y+Lumens.settings.size.y*
+							Math.random()*Lumens.settings.sizeRange.y)
 				}));
 				
 				return this;
-			},
-			collision: function(dt, rect) {
-				var collision = null, s = this.boundRect.size,
-
-					/* In the case that the rect is larger than this boundRect,
-						it should be centered */
-					margin = new Vec2D(Math.max((rect.size.x-s.x)/2, 0),
-						Math.max((rect.size.y-s.y)/2, 0)),
-
-					normal = new Vec2D(Math.max(-rect.pos.x, margin.x)+
-							Math.min(s.x-(rect.pos.x+rect.size.x), -margin.x),
-						Math.max(-rect.pos.y, margin.y)+
-							Math.min(s.y-(rect.pos.y+rect.size.y), -margin.y)),
-
-					penetration = normal.mag();
-
-				if(penetration) {
-					collision = {
-						object: this, normal: normal.doScale(1/penetration),
-						penetration: penetration,
-						/* TODO: set this to be the time passed since
-							the time of the collision */
-						dt: dt
-					};
-				}
-
-				return collision;
 			}
 		});
 		$.extend(Lumens, {
@@ -2619,11 +2991,284 @@
 				return((!Lumens.singleton)? Lumens.singleton : new Lumens());
 			},
 			singleton: null,*/
-			minSize: new Vec2D(720, 720),
-			sizeRange: new Vec2D(3, 3),
+			settings: {
+				size: new Vec2D(720, 720), sizeRange: new Vec2D(3, 3),
+				predators: { num: 300 }
+			},
 			states: new Enum('running', 'paused', 'fin')
 		});
-	// }
+//	}
+				
+	
+//	DEBUG {
+		/* GUI for testing */
+		function addGUI(lumens) {
+			var load = {
+					"preset": "Lumens",
+					"closed": false,
+					"remembered": {
+						"Lumens": {
+							"0": {
+								"maxForce": 0.03,
+								"damping": 0.995
+							},
+							"1": {
+								"rad": 100
+							},
+							"2": {
+								"color": {
+									"r": 200,
+									"g": 200,
+									"b": 200,
+									"a": 0.7
+								}
+							},
+							"3": {
+								"color": {
+									"r": 255,
+									"g": 255,
+									"b": 255,
+									"a": 1
+								}
+							},
+							"4": {
+								"num": 300
+							},
+							"5": {
+								"maxForce": 0.005
+							},
+							"6": {
+								"predict": 0.6,
+								"nearbyRad": 101.10000000000001
+							},
+							"7": {
+								"separation": 0.501,
+								"cohesion": 0.021,
+								"alignment": 0.414
+							},
+							"8": {
+								"wander": 1.494,
+								"minSpeed": 0.8
+							},
+							"9": {
+								"invMass": 0.005
+							},
+							"10": {
+								"bounds": true,
+								"trails": true,
+								"health": false,
+								"states": false,
+								"tree": true
+							},
+							"11": {
+								"damping": 0.7,
+								"factor": 0.004
+							},
+							"12": {
+								"toroid": false
+							},
+							"13": {
+								"x": 3000,
+								"y": 2000
+							}
+						}
+					},
+					"folders": {
+						"Player": {
+							"preset": "Default",
+							"closed": true,
+							"folders": {
+								"Light": {
+									"preset": "Default",
+									"closed": true,
+									"folders": {}
+								}
+							}
+						},
+						"Predators": {
+							"preset": "Default",
+							"closed": false,
+							"folders": {
+								"AI": {
+									"preset": "Default",
+									"closed": false,
+									"folders": {}
+								}
+							}
+						},
+						"Viewport": {
+							"preset": "Default",
+							"closed": true,
+							"folders": {}
+						},
+						"Environment": {
+							"preset": "Default",
+							"closed": true,
+							"folders": {}
+						}
+					}
+				},
+				gui = new dat.GUI({ load: load, preset: 'Lumens' });
+
+			gui.add(lumens, "frameRate", 0, 0).listen();
+
+			var playerFolder = gui.addFolder("Player"),
+				predatorFolder = gui.addFolder("Predators"),
+				viewportFolder = gui.addFolder("Viewport"),
+				environmentFolder = gui.addFolder("Environment"),
+
+				/* Note that the alpha can't be 1 to work with dat.GUI */
+				player = { color: lumens.player.shape.color.toRGBA() },
+				light = { color: lumens.player.light.color.toRGBA() };
+
+			gui.remember(lumens.player);
+			gui.remember(lumens.player.light);
+			gui.remember(player);
+			gui.remember(light);
+			
+			playerFolder.addColor(player, "color").onChange(function(c) {
+				lumens.player.shape.color.fromRGBA(c.r, c.g, c.b, c.a);
+			});
+			playerFolder.add(lumens.player, 'maxForce', 0.01, 1.01).step(0.01).listen();
+			playerFolder.add(lumens.player, 'damping', 0.001, 1.000).step(0.001).listen();
+
+			var lightFolder = playerFolder.addFolder("Light");
+
+			lightFolder.add(lumens.player.light, "rad", 0, 1000).listen();
+			lightFolder.addColor(light, "color").onChange(function(c) {
+				lumens.player.light.color.fromRGBA(c.r, c.g, c.b, c.a);
+			});
+
+			var predSett = { num: lumens.swarm.source.length };
+
+			gui.remember(predSett);
+
+			predatorFolder.add(predSett, "num", 0, 2000).listen()
+			.onChange(function(num) {
+				predSett.num = num |= 0;
+
+				while(num < lumens.swarm.source.length) {
+					var i = (Math.random()*(lumens.swarm.source.length-1)) | 0;
+					lumens.removePredator(lumens.swarm.source[i]);
+				}
+				while(num > lumens.swarm.source.length) { lumens.addPredator(); }
+			});
+
+			var AIFolder = predatorFolder.addFolder("AI");
+
+			function setWeight(weight, influence) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].swarmForce.weight[influence] = weight;
+				}
+			}
+
+			gui.remember(Predator.settings);
+			gui.remember(Predator.settings.swarmForce);
+			gui.remember(Predator.settings.swarmForce.weight);
+
+			AIFolder.add(Predator.settings.swarmForce.weight, "separation",
+			0, 1).step(0.001).listen().onChange(function(weight) {
+				setWeight(weight, "separation");
+			});
+			AIFolder.add(Predator.settings.swarmForce.weight, "cohesion",
+			0, 0.1).step(0.001).listen().onChange(function(weight) {
+				setWeight(weight, "cohesion");
+			});
+			AIFolder.add(Predator.settings.swarmForce.weight, "alignment",
+			0, 1).step(0.001).listen().onChange(function(weight) {
+				setWeight(weight, "alignment");
+			});
+
+			AIFolder.add(Predator.settings.swarmForce, "predict",
+			0, 5).step(0.001).listen().onChange(function(predict) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].swarmForce.predict = predict;
+				}
+			});
+
+			var wander = Predator.settings.wanderForce,
+				wanderSettings = { wander: wander.weight, minSpeed: wander.minSpeed };
+			
+			gui.remember(wanderSettings);
+
+			AIFolder.add(wanderSettings, "wander", 0, 10).step(0.001)
+			.onChange(function(weight) {
+				wander.weight = weight;
+
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].wanderForce.weight = weight;
+				}
+			});
+			AIFolder.add(wanderSettings, "minSpeed", 0, 10).step(0.001)
+			.onChange(function(speed) {
+				wander.minSpeed = speed;
+
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].wanderForce.minSpeed = speed;
+				}
+			});
+
+			var avoid = Predator.settings.avoidForce,
+				avoidSettings = { avoid: avoid.weight, avoidRadius: avoid.radius };
+			
+			gui.remember(avoidSettings);
+
+			AIFolder.add(avoidSettings, "avoid", 0, 10).step(0.001)
+			.onChange(function(weight) {
+				avoid.weight = weight;
+
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].avoidForce.weight = weight;
+				}
+			});
+			AIFolder.add(avoidSettings, "avoidRadius", 0, 100).step(0.001)
+			.onChange(function(radius) {
+				avoid.radius = radius;
+
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].avoidForce.radius = radius;
+				}
+			});
+			
+			AIFolder.add(Predator.settings.swarmForce, "nearbyRad", 0, 1000)
+			.step(0.05).listen().onChange(function(rad) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].swarmForce.nearbyRad = rad;
+				}
+			});
+			
+			AIFolder.add(Predator.settings, "maxForce", 0, 1)
+			.step(0.005).listen().onChange(function(maxForce) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].maxForce = maxForce;
+				}
+			});
+
+			gui.remember(lumens.viewport);
+			gui.remember(lumens.viewport.debug);
+			gui.remember(lumens.viewport.springForce);
+
+			for(var s in lumens.viewport.debug) {
+				viewportFolder.add(lumens.viewport.debug, s);
+			}
+
+			viewportFolder.add(lumens.viewport.springForce, "damping", 0, 1);
+			viewportFolder.add(lumens.viewport.springForce, "factor", 0, 1);
+			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1);
+
+
+			gui.remember(lumens);
+			gui.remember(lumens.boundRect.size);
+
+			environmentFolder.add(lumens.boundRect.size, "x").listen();
+			environmentFolder.add(lumens.boundRect.size, "y").listen();
+			environmentFolder.add(lumens, "toroid").listen();
+
+			//gui.close();
+
+			return gui;
+		}
+//	}
 
 	$(function() {
 		$.getJSON("js/test_environment.json", function(JSON) {
