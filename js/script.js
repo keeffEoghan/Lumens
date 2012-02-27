@@ -918,6 +918,9 @@
 				this.normal = (normal || new Vec2D());
 				this.penetration = (penetration || 0);
 				this.dt = (dt || 0);
+
+				this.vector = null;
+				this.updateVector();
 			}
 			$.extend(Collision.prototype, {
 				copy: function(other) {
@@ -940,6 +943,10 @@
 					this.other = other;
 					this.normal.doScale(-1);
 
+					return this;
+				},
+				updateVector: function() {
+					this.vector = this.normal.scale(this.penetration);
 					return this;
 				}
 			});
@@ -1099,7 +1106,7 @@
 						// TODO: fine collision detection
 						/* TODO: improve to check if shape intersects edges, not
 							if some of it lies on the "inside" */
-						var collision = null;
+						var collision = new Collision(shape, other);
 
 						if(other.boundRad.intersects(shape.boundRad)) {
 							for(var p = 0; p < other.points.length; ++p) {
@@ -1108,16 +1115,17 @@
 									c = Collision.Circle.checkLine(shape.boundRad,
 										a, b);
 
-								if(c && (!collision ||
-									c.penetration > collision.penetration)) {
-									c.self = shape;
-									c.other = other;
-									collision = c;
+								if(c) {
+									var v = collision.vector.add(c.vector);
+
+									collision.penetration = v.mag();
+									collision.normal =
+										v.doScale(1/collision.penetration);
 								}
 							}
 						}
 
-						return collision;
+						return ((collision.penetration > 0)? collision : null);
 					},
 					resolveLumens: function(collision) {
 						collision.self.updateBounds();
@@ -1508,8 +1516,7 @@
 									c = Collision.Circle.checkLine(focus, a, b);
 
 								if(c) {
-									force.doAdd(c.normal
-										.doScale(c.penetration*c.penetration));
+									force.doAdd(c.vector.scale(c.penetration));
 								}
 							}
 						}
@@ -1568,7 +1575,16 @@
 					}
 
 					return ((options.point2)? [impulse, impulse] : impulse);
-				}
+				}/*,
+				friction: function(options) {*/
+					/* Friction acts against the component of the
+						velocity 'v' parallel to the surface.
+						The component parallel to the surface's normal 'n' is (n.v)n
+						The component parallel to the surface is perpendicular to
+						this, v-(n.v)n
+						So we have friction = -f(v-(n.v)n),
+						where f is a coefficient of friction*/
+				//}
 			};
 
 
@@ -1649,6 +1665,7 @@
 
 
 	//	SHAPES {
+			// TODO: add normals as members
 			// No orientation - just position (bound to particle)
 			function Shape(options) {
 				if(!options) { options = {}; }
@@ -1944,7 +1961,6 @@
 			Entity.call(this, Particle, settings);
 			
 			/* Set up the shape */
-			/* TODO: change to BodyShape */
 			var points = [], num = 10, mass = settings.mass/num;
 			Circle.generateVecs(10, 15, invoke, this, function(pos) {
 				points.push(new Particle({ pos: pos, mass: mass }));
@@ -2858,19 +2874,11 @@
 			this.viewport.renderDone.watch((function() {
 				this.viewport.shape ... this.entities;
 			}).call, this); */
-			
-			this.frameUpdate = (settings.frameUpdate || 1000);
-			this.frames = this.frameRate = 0;
+
 			this.time = Date.now();
 			this.state = Lumens.states.running;
 
 			var lumens = this;
-
-			setTimeout(function() {
-				lumens.frameRate = lumens.frames/(lumens.frameUpdate/1000);
-				lumens.frames = 0;
-				setTimeout(arguments.callee, lumens.frameUpdate);
-			}, this.frameUpdate);
 
 			requestAnimationFrame(function() { lumens.step(); });
 		}
@@ -3110,7 +3118,15 @@
 				},
 				gui = new dat.GUI({ load: load, preset: 'Lumens' });
 
-			gui.add(lumens, "frameRate", 0, 0).listen();
+			var stats = new Stats(), statsBox = stats.getDomElement();
+
+			$.extend(statsBox.style, { position: 'absolute',
+				left: '0px', top: '0px' });
+
+			$("#main").after(statsBox);
+
+			setTimeout(function(t) { stats.update(); setTimeout(arguments.callee, t); },
+				1000/20);
 
 			var playerFolder = gui.addFolder("Player"),
 				predatorFolder = gui.addFolder("Predators"),
