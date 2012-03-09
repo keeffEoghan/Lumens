@@ -9,16 +9,6 @@
 			func.apply(object, Array.prototype.slice.call(arguments, 2));
 		}
 
-		/* Adapted from John Resig's instanceOf - http://ejohn.org/blog/objectgetprototypeof/ */
-		function instance(object, Class) {
-			for(var prototype = Object.getPrototypeOf(object); prototype;
-				prototype = Object.getPrototypeOf(prototype)) {
-				if(prototype === Class.prototype) { return true; }
-			}
-
-			return false;
-		}
-
 		/* Safer than inheriting from new Parent(), as Object.create
 			circumvents the constructor, which could cause problems (needing
 			a whole load of arguments, having throw clauses, etc) */
@@ -224,7 +214,7 @@
 				var radSub = this.rad-other.rad;
 				return (radSub >= 0 && this.pos.distSq(other.pos) <= radSub*radSub);
 			},
-			rad: function(rad) {
+			radius: function(rad) {
 				if(rad) {
 					this.rad = rad;
 					this.radSq = this.rad*this.rad;
@@ -233,7 +223,7 @@
 				}
 				else { return this.rad; }
 			},
-			radSq: function(radSq) {
+			radiusSq: function(radSq) {
 				if(radSq) {
 					this.radSq = radSq;
 					this.rad = Math.sqrt(this.radSq);
@@ -637,100 +627,6 @@
 			}
 		});
 
-		
-		/* Conversion functions adapted from Michael Jackson's (really) - http://mjijackson.com/2008/02/rgb-to-hsl-and-rgb-to-hsv-color-model-conversion-algorithms-in-javascript */
-		function Color(r, g, b, a) {
-			this.r = (r || 0);
-			this.g = (g || 0);
-			this.b = (b || 0);
-			this.a = (a || 1);
-		}
-		$.extend(Color.prototype, {
-			fromHSLA: function(h, s, l, a) {
-				h /= 359;
-				s /= 100;
-				l /= 100;
-
-				this.a = a;
-
-				if(s === 0) { this.r = this.g = this.b = l; }
-				else {
-					var hueToRGB = function(p, q, t) {
-						if(t < 0) { ++t; }
-						else if(t > 1) { --t; }
-						
-						return ((t < 1/6)? p+(q-p)*6*t
-							:	((t < 1/2)? q
-							:	((t < 2/3)? p+(q-p)*(2/3-t)*6
-							:	p)));
-					};
-
-					var q = ((l < 0.5)? l*(1+s) : l+s-l*s);
-					var p = 2*l-q;
-					
-					this.r = hueToRGB(p, q, h+1/3);
-					this.g = hueToRGB(p, q, h);
-					this.b = hueToRGB(p, q, h-1/3);
-				}
-				
-				return this;
-			},
-			fromRGBA: function(r, g, b, a) {
-				this.r = r/255; this.g = g/255; this.b = b/255; this.a = a;
-				
-				return this;
-			},
-			toRGBA: function() {
-				return { r: (this.r*255) | 0, g: (this.g*255) | 0,
-					b: (this.b*255) | 0, a: this.a };
-			},
-			toHSLA: function() {
-				var max = Math.max(this.r, this.g, this.b),
-					min = Math.min(this.r, this.g, this.b),
-					h, s, l = (max+min)/2;
-
-				if(max == min){
-					h = s = 0; // achromatic
-				}
-				else {
-					var d = max-min;
-					
-					s = ((l > 0.5) ? d/(2-max-min) : d/(max+min));
-					
-					switch(max){
-						case this.r:
-							h = (this.g-this.b)/d+((this.g < this.b)? 6 : 0);
-						break;
-						case this.g:
-							h = (this.b-this.r)/d+2;
-						break;
-						case this.b:
-							h = (this.r-this.g)/d+4;
-						break;
-					}
-					h /= 6;
-				}
-
-				return { h: (h*360) | 0, s: (s*100) | 0, l: (l*100) | 0, a: this.a };
-			},
-			RGBAString: function() {
-				var rgba = this.toRGBA();
-				return "rgba("+rgba.r+", "+rgba.g+", "+rgba.b+", "+rgba.a+")";
-			},
-			HSLAString: function() {
-				var hsla = this.toHSLA();
-				return "hsla("+hsla.h+", "+hsla.s+", "+hsla.l+", "+hsla.a+")";
-			}
-		});
-		$.extend(Color, {
-			fromHSLA: function(h, s, l, a) {
-				return (new Color()).fromHSLA(h, s, l, a);
-			},
-			fromRGBA: function(r, g, b, a) {
-				return (new Color()).fromRGBA(r, g, b, a);
-			}
-		});
-
 
 		// For touchscreen devices
 		function Thumbstick(rad, unit) {
@@ -910,6 +806,9 @@
 			}
 		});
 
+	/* TODO: provide simpler geometry for testing against collisions?
+		Or use normal maps to increase detail on what's actually
+		simple geometry? */
 	//	COLLISIONS {
 			// Convenience
 			function Collision(self, other, normal, penetration, dt) {
@@ -942,6 +841,7 @@
 					this.self = this.other;
 					this.other = other;
 					this.normal.doScale(-1);
+					this.updateVector();
 
 					return this;
 				},
@@ -950,6 +850,9 @@
 					return this;
 				}
 			});
+			/* TODO: add a boolean flag for broad/narrow collision
+				detection to each check - only broad will be used outside
+				the visible/frequently updated area */
 			$.extend(Collision, {
 				Circle: {
 					checkLine: function(circle, a, b) {
@@ -1004,7 +907,7 @@
 							
 							penSq = circle.radSq-lSq;
 						}
-						else { penSq = cirlce.radSq-vec.magSq(); }
+						else { penSq = circle.radSq-vec.magSq(); }
 
 						if(penSq > 0) {
 							collision = new Collision(circle, [a, b],
@@ -1059,8 +962,9 @@
 						}
 
 						if(colliders.walls) {
-							for(var walls = colliders.walls.get(treeItem), w = 0;
-								w < walls.length; ++w) {
+							var walls = colliders.walls.get(treeItem);
+
+							for(var w = 0; w < walls.length; ++w) {
 								var wallCollision = this.checkWall(shape,
 										walls[w].item);
 
@@ -1103,24 +1007,25 @@
 						return collision;
 					},
 					checkWall: function(shape, other) {
-						// TODO: fine collision detection
-						/* TODO: improve to check if shape intersects edges, not
-							if some of it lies on the "inside" */
+						// TODO: optimisations and fine collision detection
 						var collision = new Collision(shape, other);
 
 						if(other.boundRad.intersects(shape.boundRad)) {
-							for(var p = 0; p < other.points.length; ++p) {
-								var a = other.points.wrap(p-1).pos,
-									b = other.points[p].pos,
+							var verts = other.three.geometry.vertices;
+							
+							for(var v = 0; v < verts.length; ++v) {
+								var a = other.globPos(verts.wrap(v-1).position),
+									b = other.globPos(verts[v].position),
 									c = Collision.Circle.checkLine(shape.boundRad,
-										a, b);
+											a, b);
 
 								if(c) {
-									var v = collision.vector.add(c.vector);
+									// TODO: fine collision detection here
+									var vec = collision.vector.add(c.vector);
 
-									collision.penetration = v.mag();
+									collision.penetration = vec.mag();
 									collision.normal =
-										v.doScale(1/collision.penetration);
+										vec.doScale(1/collision.penetration);
 								}
 							}
 						}
@@ -1145,13 +1050,13 @@
 					}
 				},
 				Entity: {
-					// colliders: { QuadTree entities, Lumens lumens, QuadTree walls }
+					// colliders: { QuadTree swarm, Firefly player, Lumens lumens, QuadTree walls }
 					check: function(entity, colliders, dt, callback, args) {
 						var collisions = [], treeItem = entity.treeItem;
 
 						// TODO: fine collision detection (shape)
-						if(colliders.entities) {
-							for(var nearby = colliders.entities.get(treeItem),
+						if(colliders.swarm) {
+							for(var nearby = colliders.swarm.get(treeItem),
 								n = 0; n < nearby.length; ++n) {
 								var entityCollision = this.checkEntity(entity,
 										nearby[n].item);
@@ -1166,6 +1071,23 @@
 											Array.prototype.slice.call(arguments, 4)
 												.concat(entityCollision));
 									}
+								}
+							}
+						}
+
+						if(colliders.player) {
+							var playerCollision = this.checkEntity(entity,
+									colliders.player);
+							
+							if(playerCollision) {
+								playerCollision.dt = dt;
+								collisions.push(playerCollision);
+								this.resolveEntity(playerCollision);
+
+								if(callback) {
+									callback.apply(null,
+										Array.prototype.slice.call(arguments, 4)
+											.concat(playerCollision));
 								}
 							}
 						}
@@ -1342,7 +1264,7 @@
 					checkRect: function(lumens, other) {
 						var collision = null;
 
-						if(lumens !== other && !lumens.boundRect.contains(other)) {
+						if(!lumens.boundRect.contains(other)) {
 							var s = lumens.boundRect.size,
 
 								/* In the case that the rect is larger than lumens
@@ -1368,7 +1290,6 @@
 				}
 			});
 	//	}
-
 
 	//	INFLUENCES {
 			var Force = {
@@ -1404,38 +1325,6 @@
 
 					return damp.doAdd(spring);
 				},
-				/* Adapted from "How To Implement a Pressure Soft Body
-					Model", by Maciej Matyka, using Gauss' theorem to obtain volume,
-					and pressure from there - maq@panoramix.ift.uni.wroc.pl */
-				/* A bit different to the others, in that it doesn't return a force to
-					be applied to each point in turn, but rather applies it across
-					all of the points in turn */
-				applyPressure: function(points, factor) {
-					// Derived used to prevent repeated calculations
-					var volume = 0, derived = [];
-
-					for(var p = 0; p < points.length; ++p) {
-						var from = points.wrap(p-1), to = points[p],
-							vec = to.pos.sub(from.pos),
-							mag = vec.mag();
-
-						if(mag) {
-							var normal = vec.perp().doScale(1/mag);
-							
-							volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
-							derived.push({ from: from, to: to, mag: mag, normal: normal});
-						}
-					}
-
-					var invVolume = 1/volume;
-					for(var d = 0; d < derived.length; ++d) {
-						var data = derived[d],
-							pressure = invVolume*factor*data.mag;
-						
-						data.from.force.doAdd(data.normal.scale(pressure));
-						data.to.force.doAdd(data.normal.scale(pressure));
-					}
-				},
 				// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
 				// { Number range, Vec2D vel }
 				wander: function(options) {
@@ -1452,7 +1341,7 @@
 				// { QuadTree swarm, Particle member, Number nearbyRad, { Number separation, Number alignment, Number cohesion } weight, Number predict (o) }
 				swarm: function(options) {
 					var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
-						totalAlignment = new Vec2D(), swarmForce = new Vec2D(),
+						totalAlignment = new Vec2D(), swarm = new Vec2D(),
 						
 						predict = (options.predict || 0),
 						focus = options.member.vel.scale(predict)
@@ -1490,39 +1379,88 @@
 					}
 					
 					if(num) {
-						swarmForce.doAdd(totalSeparation.doScale(options.weight.separation))
+						swarm.doAdd(totalSeparation.doScale(options.weight.separation))
 							.doAdd(totalCohesion.doScale(options.weight.cohesion))
 							.doAdd(totalAlignment.doScale(options.weight.alignment))
 							.doScale(1/num);
 					}
 					
-					return swarmForce;
+					return swarm;
 				},
-				// { Particle point, QuadTree walls, Number radius, Number predict }
+				// { Particle point, QuadTree walls, Lumens lumens, Number radius, Number predict }
 				avoidWalls: function(options) {
 					var force = new Vec2D(),
 						predict = (options.predict || 0),
 						focus = new Circle(options.point.vel.scale(predict)
-								.doAdd(options.point.pos), options.radius);
+								.doAdd(options.point.pos), options.radius),
+						nearby = options.walls.get(focus.containingAARect());
 
-					for(var w = 0, nearby = options.walls.get(focus.containingAARect());
-						w < nearby.length; ++w) {
+					for(var w = 0; w < nearby.length; ++w) {
 						var wall = nearby[w].item;
 
 						if(wall.boundRad.intersects(focus)) {
-							for(var p = 0; p < wall.points.length; ++p) {
-								var a = wall.points.wrap(p-1).pos,
-									b = wall.points[p].pos,
-									c = Collision.Circle.checkLine(focus, a, b);
+							var verts = wall.three.geometry.vertices;
+							
+							for(var v = 0; v < verts.length; ++v) {
+								var a = wall.globPos(verts.wrap(v-1).position),
+									b = wall.globPos(verts[v].position),
+									c = Collision.Circle.checkLine(focus,
+											a, b);
 
 								if(c) {
+									// Inverse square force
 									force.doAdd(c.vector.scale(c.penetration));
 								}
 							}
 						}
 					}
 
+					if(options.lumens) {
+						var lc = Collision.Lumens.checkRect(options.lumens,
+										focus.containingAARect());
+
+						if(lc) {
+							lc.doSwap();
+
+							// Inverse square force
+							force.doAdd(lc.vector.scale(lc.penetration));
+						}
+					}
+
 					return force;
+				},
+				/* Adapted from "How To Implement a Pressure Soft Body
+					Model", by Maciej Matyka, using Gauss' theorem to obtain volume,
+					and pressure from there - maq@panoramix.ift.uni.wroc.pl */
+				/* A bit different to the others, in that it doesn't return a force to
+					be applied to each point in turn, but rather applies it across
+					all of the points in turn */
+				applyPressure: function(points, factor) {
+					// Derived used to prevent repeated calculations
+					var volume = 0, derived = [];
+
+					// TODO: change to use THREE.geometry's existing normals
+					for(var p = 0; p < points.length; ++p) {
+						var from = points.wrap(p-1), to = points[p],
+							vec = to.pos.sub(from.pos),
+							mag = vec.mag();
+
+						if(mag) {
+							var normal = vec.perp().doScale(1/mag);
+							
+							volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
+							derived.push({ from: from, to: to, mag: mag, normal: normal});
+						}
+					}
+
+					var invVolume = 1/volume;
+					for(var d = 0; d < derived.length; ++d) {
+						var data = derived[d],
+							pressure = invVolume*factor*data.mag;
+						
+						data.from.force.doAdd(data.normal.scale(pressure));
+						data.to.force.doAdd(data.normal.scale(pressure));
+					}
 				}
 			};
 
@@ -1615,109 +1553,56 @@
 	//	}
 
 
-		// Pointlight
-		function Light(options) {
-			if(!options) { options = {}; }
-			
-			Circle.call(this, (options.pos || new Vec2D()), (options.rad || 5));
-			this.color = (options.color || Color.fromRGBA(255, 255, 255, 1));
-		}
-		$.extend(inherit(Light, Circle).prototype, {
-			render: function(context) {
-				if(this.rad) {
-					context.save();
-
-					var color = this.color.RGBAString(), falloff = 8,
-						gradient = context.createRadialGradient(this.pos.x,
-								this.pos.y, this.rad-falloff,
-								this.pos.x, this.pos.y, this.rad);
-					
-					gradient.addColorStop(0, color);
-					gradient.addColorStop(1, "rgba(0, 0, 0, 0)");
-					context.fillStyle = gradient;
-					
-					context.beginPath();
-					context.arc(this.pos.x, this.pos.y, this.rad, 0, Math.PI*2);
-					context.fill();
-
-					context.restore();
-				}
-
-				return this;
-			}
-		});
-
-
+		// Wraps THREE.Spotlight... or should it subclass it??
 		function Spotlight(options) {
 			if(!options) { options = {}; }
 			
-			Light.call(this, options);
+			this.three = options.three;	// Spotlight
 
 			this.target = (options.target || new Vec2D());
 		}
-		$.extend(inherit(Spotlight, Light).prototype, {
-			render: function(context) {
-				/* TODO: WebGL - render from pos point to circle with
-					center target and radius rad */
-				return this;
-			}
-		});
-
 
 	//	SHAPES {
-			// TODO: add normals as members
+			// Wraps THREE.Mesh
+
 			// No orientation - just position (bound to particle)
 			function Shape(options) {
 				if(!options) { options = {}; }
 				
 				this.owner = (options.owner || new Particle());
 
-				this.points = (($.isArray(options.points))? options.points : []);	// All the points contained in this shape - positions relative to owner.pos
-				
-				/* Visual information goes in here
-					TODO: patterns, images, etc */
-				this.color = (options.color || Color.fromRGBA(200, 200, 200, 0.99));
+				this.three = options.three;	//  THREE.Mesh
 
-				this.closed = ((options.closed !== undefined)? options.closed : true);
-				this.filled = ((options.filled !== undefined)? options.filled : true);
-				
 				this.boundRad = new Circle();
 				this.treeItem = null;
-				this.updateBounds();
+				this.resolve().updateBounds();
 			}
 			$.extend(Shape.prototype, {
 				update: function() { return this; },
 				resolve: function(dt) {
-					/* For positions not relative to owner.pos *//*
-					var last = this.owner.trail[0];
+					this.three.position.x = this.owner.pos.x;
+					this.three.position.y = this.owner.pos.y;
 
-					if(last && !this.owner.pos.equals(last)) {
-						var move = this.owner.pos.sub(last);
-
-						for(var p = 0; p < this.points.length; ++p) {
-							this.points[p].updateTrail(dt).pos.doAdd(move);
-						}
-					}*/
-					
 					this.updateBounds();
 
 					return this;
 				},
 				updateBounds: function() {
-					this.boundRad.radSq = this.boundRad.rad = 0;
+					/* Potentially Smaller radius *//*
+					this.boundRad.radius(0);
 					this.boundRad.pos.doZero();
 
-					var l = this.points.length;
+					var verts = this.three.geometry.vertices, l = verts.length;
 					
 					if(l) {
 						for(var i = 0; i < l; ++i) {
-							this.boundRad.pos.doAdd(this.globPos(this.points[i].pos));
+							this.boundRad.pos.doAdd(this.globPos(verts[i].pos));
 						}
 						this.boundRad.pos.doScale(1/l);
 						
 						for(var j = 0; j < l; ++j) {
 							var radSq = this.boundRad.pos
-								.distSq(this.globPos(this.points[j].pos));
+								.distSq(this.globPos(verts[j].pos));
 							
 							if(radSq > this.boundRad.radSq) {
 								this.boundRad.radSq = radSq;
@@ -1729,165 +1614,25 @@
 
 					this.treeItem = this.boundRad.containingAARect();
 					this.treeItem.item = this;
+					*/
+					this.three.geometry.computeBoundingSphere();
+					this.three.boundRadius = this.three.geometry
+						.boundingSphere.radius;
+
+					this.boundRad.pos.x = this.three.position.x;
+					this.boundRad.pos.y = this.three.position.y;
+					this.boundRad.radius(this.three.boundRadius);
+
+					/* TODO: change to three.geometry.boundingBox? More
+						computation here, but closer fit to shape */
+					this.treeItem = this.boundRad.containingAARect();
+					this.treeItem.item = this;
 					
-					return this;
-				},
-				render: function(context) {
-					var color = this.color.RGBAString(),
-						pos = this.globPos(this.points[0].pos),
-						l = ((this.closed)?
-							this.points.length+1 : this.points.length);
-
-					context.save();
-					context.strokeStyle = context.fillStyle = color;
-					context.beginPath();
-					context.moveTo(pos.x, pos.y);
-
-					for(var p = 1; p < l; ++p) {
-						pos = this.globPos(this.points.wrap(p).pos);
-						context.lineTo(pos.x, pos.y);
-					}
-
-					context[((this.filled)? 'fill' : 'stroke')]();
-					context.restore();
-
 					return this;
 				},
 				relPos: function(globPos) { return globPos.sub(this.owner.pos); },
 				globPos: function(relPos) { return this.owner.pos.add(relPos); }
 			});
-
-			
-			function SoftShape(options) {
-				if(!options) { options = {}; }
-
-				/* Call super constructor */
-				Shape.call(this, options);
-
-				/* [{ Particle pointFrom, Vec2D posFrom, Particle pointTo, Vec2D posTo, Number factor, Number restLength }] */
-				this.edges = (($.isArray(options.edges))? options.edges : []);	// The edge of the shape - may be repeated
-				this.ties = (($.isArray(options.ties))? options.ties : []);	// Other ties, such as to cenetMass - may be repeated, usually one-to-one between each point and owner
-
-				this.pressureFactor = (options.pressureFactor || 0.005);
-			}
-			$.extend(inherit(SoftShape, Shape).prototype, {
-				update: function() {
-					for(var e = 0; e < this.edges.length; ++e) {
-						var edge = this.edges[e];
-						edge.pointFrom.force.doAdd(Force.spring(edge));
-					}
-
-					for(var t = 0; t < this.ties.length; ++t) {
-						var tie = this.ties[t];
-						tie.pointFrom.force.doAdd(Force.spring(tie));
-					}
-
-					Force.applyPressure(this.points, this.pressureFactor);
-
-					return this;
-				},
-				resolve: function(dt) {
-					/*for(var p = 0; p < this.points.length; ++p) {
-						this.points[p].resolve(dt);
-					}*/
-					// Offset from relative center
-					var last = this.owner.trail[0],
-						resolve;
-
-					if(last && !this.owner.pos.equals(last)) {
-						var moveRel = this.owner.pos.sub(last);
-
-						resolve = function(point) {
-							point.pos.doSub(moveRel);
-							point.resolve(dt);
-						};
-					}
-					else { resolve = function(point) { point.resolve(dt); }; }
-
-					for(var p = 0; p < this.points.length; ++p) {
-						resolve(this.points[p]);
-					}
-					
-					this.updateBounds();
-
-					return this;
-				},
-				render: function(context) {
-					/* Probable problem with the way this is done - quadratic curve
-						may go beyond the bounding radius */
-					if(this.points.length >= 2) {
-						var color = this.color.RGBAString(),
-							falloff = 0.99,
-							pos = this.globPos(this.points[0].pos),
-							last = null, ctrlP = null,
-							l = ((this.closed)?
-								this.points.length+1 : this.points.length);
-
-						context.save();
-						context.strokeStyle = context.fillStyle = color;
-						context.beginPath();
-						context.moveTo(pos.x, pos.y);
-
-						for(var p = 1; p < l; ++p) {
-							last = pos;
-							pos = this.globPos(this.points.wrap(p).pos);
-							ctrlP = last.add(pos.sub(last).doScale(falloff));
-							context.quadraticCurveTo(ctrlP.x, ctrlP.y,
-								pos.x, pos.y);
-						}
-
-						context[((this.filled)? 'fill' : 'stroke')]();
-						context.restore();
-					}
-
-					return this;
-				},
-				setupSurface: function(points, edgeSpringFactor, tieSpringFactor) {
-					var relCenter = new Vec2D();
-
-					this.edges.length = this.ties.length = 0;
-					this.points = points.slice(0);
-
-					for(var p = 0; p < points.length; ++p) {
-						var point = points[p];
-
-						this.ties.push({ pointFrom: point, posFrom: point.pos,
-							posTo: relCenter, factor: edgeSpringFactor,
-							restLength: point.pos.mag() });
-						
-						for(var loop = 0, offset = -1; loop < 2;
-							++loop, offset *= -1) {
-							var other = points.wrap(p+offset);
-							
-							this.edges.push({ pointFrom: point, posFrom: point.pos,
-								pointTo: other, posTo: other.pos,
-								factor: tieSpringFactor,
-								restLength: point.pos.dist(other.pos) });
-						}
-					}
-
-					return this.updateBounds();
-				}
-			});
-			
-
-			// Orientation and position (bound to body)
-			function BodyShape(options) {
-				if(!options) { options = {}; }
-				
-				/* Call super constructor
-					Note: this expects a body as owner, not a particle */
-				Shape.call(this, options);
-			}
-			$.extend(inherit(BodyShape, Shape).prototype);
-			
-
-			function SoftBodyShape(options) {
-				if(!options) { options = {}; }
-				
-				BodyShape.call(this, options);
-			}
-			$.extend(inherit(SoftBodyShape, BodyShape).prototype);
 	//	}
 //	}
 	
@@ -1913,11 +1658,6 @@
 			this.treeItem = null;
 		}
 		$.extend(Entity.prototype, {
-			update: function() {
-				this.shape.update();
-
-				return this;
-			},
 			resolve: function(dt) {
 				if(dt) {
 					this.Type.prototype.resolve.call(this, dt);
@@ -1925,6 +1665,11 @@
 					this.updateTreeItem();
 				}
 				
+				return this;
+			},
+			update: function() {
+				this.shape.update();
+
 				return this;
 			},
 			updateTreeItem: function() {
@@ -1959,35 +1704,24 @@
 			/* Particle entity template */
 			/* TODO: change to Body */
 			Entity.call(this, Particle, settings);
-			
-			/* Set up the shape */
-			var points = [], num = 10, mass = settings.mass/num;
-			Circle.generateVecs(10, 15, invoke, this, function(pos) {
-				points.push(new Particle({ pos: pos, mass: mass }));
-			});
 
-			/*this.shape = (new SoftShape({ owner: this,
-					color: Color.fromRGBA(200, 200, 200, 0.7) })
-				.setupSurface(points, 0.0001, 0.001));*/
-
-			this.shape = new Shape({ owner: this, points: points,
-					color: Color.fromRGBA(200, 200, 200, 0.7) });
+			this.shape = new Shape({ owner: this,
+				three: new THREE.Mesh(new THREE.SphereGeometry(15, 7, 7),
+					new THREE.MeshLambertMaterial({ color: 0xffffff,
+						wireframe: true })) });
 			
 			settings.light.pos = this.pos;
-			this.light = new Light(settings.light);
+			//this.light = new Spotlight(settings.light);
 			
 			this.inputForce = null;
 
 			this.updateTreeItem();
 		}
 		$.extend(inherit(Firefly, Entity.inherit(Particle)).prototype, {
-			resolve: function(dt) {
-				if(dt) {
-					if(this.inputForce) { this.force.doAdd(this.inputForce); }
-					Entity.prototype.resolve.call(this, dt);
-				}
-
-				return this;
+			update: function() {
+				if(this.inputForce) { this.force.doAdd(this.inputForce); }
+				
+				return Entity.prototype.update.call(this);
 			},
 			move: function(force) {
 				this.inputForce = ((force)? force.scale(this.maxForce) : null);
@@ -2022,68 +1756,87 @@
 			/* Particle entity template */
 			/* TODO: change to Body */
 			Entity.call(this, Particle, settings);
-			
-			/* Set up the shape */
-			/* TODO: change to BodyShape */
-			var points = [], num = 8, mass = settings.mass/num;
-			Circle.generateVecs(num, 7, invoke, this, function(pos) {
-				points.push(new Particle({ pos: pos, mass: mass }));
-			});
 
-			this.shape = (new Shape({ owner: this, points: points,
-					color: Color.fromRGBA(250, 200, 200, 0.7) }));
-				//.setupSurface(points, 0.008);
+			this.shape = new Shape({ owner: this,
+				three: new THREE.Mesh(new THREE.SphereGeometry(8, 5, 5),
+					new THREE.MeshLambertMaterial({ color: 0xffffff,
+						wireframe: true })) });
 
-			this.wanderForce = settings.wanderForce;
-			
-			settings.swarmForce.member = settings.avoidForce.point = this;
-			this.swarmForce = settings.swarmForce;
-			this.avoidForce = settings.avoidForce;
+			this.swarm = settings.swarm;
+			this.wander = settings.wander;
+			this.avoid = settings.avoid;
+			this.swarm.member = this.avoid.point = this;
+
+			this.schedule = settings.schedule;
+
+			for(var s in this.schedule) {
+				var schedule = this.schedule[s];
+				if(!schedule.force) { schedule.force = new Vec2D(); }
+			}
 			
 			this.state = Predator.states.spawn;
 
 			this.updateTreeItem();
 		}
 		$.extend(inherit(Predator, Entity.inherit(Particle)).prototype, {
+			resolve: function(dt) {
+				if(dt) {
+					for(var s in this.schedule) {
+						this.schedule[s].wait -= dt;
+					}
+
+					Entity.prototype.resolve.call(this, dt);
+				}
+				
+				return this;
+			},
 			update: function() {
-				switch(this.state) {
-				case Predator.states.passive: case Predator.states.aggressive:
-				case Predator.states.normal:
+				var swarmWeight = this.swarm.weight,
+					swarmWeights = swarmWeight.separation+swarmWeight.cohesion+
+						swarmWeight.alignment,
+					wanderWeight = this.wander.weight,
+					avoidWeight = this.avoid.weight,
+
+					sumWeights = swarmWeights+wanderWeight+avoidWeight;
+
+				if(this.schedule.swarm.wait <= 0) {
+					this.schedule.swarm.force = Force.swarm(this.swarm);
+					this.schedule.swarm.wait += this.schedule.swarm.delay;
+				}
+				if(this.schedule.wander.wait <= 0) {
 					if(this.vel.magSq()) {
-						this.wanderForce.vel.copy(this.vel.unit()
-							.doScale(this.wanderForce.minSpeed));
+						this.wander.vel.copy(this.vel.unit()
+							.doScale(this.wander.minSpeed));
 					}
 					else {
 						var angle = Math.random()*2*Math.PI;
-						this.wanderForce.vel.copy(new Vec2D(Math.cos(angle),
-							Math.sin(angle))).doScale(this.wanderForce.minSpeed);
+						this.wander.vel.copy(new Vec2D(Math.cos(angle),
+							Math.sin(angle))).doScale(this.wander.minSpeed);
 					}
 
-					var swarmWeight = this.swarmForce.weight,
-						swarmWeights = swarmWeight.separation+swarmWeight.cohesion+
-							swarmWeight.alignment,
-						wanderWeight = this.wanderForce.weight,
-						avoidWeight = this.avoidForce.weight,
-						sumWeights = swarmWeights+wanderWeight+avoidWeight,
+					this.schedule.wander.force = Force.wander(this.wander)
+							.doScale(wanderWeight);
 
-						swarm = Force.swarm(this.swarmForce),
-						wander = Force.wander(this.wanderForce)
-							.doScale(wanderWeight),
-						avoid = Force.avoidWalls($.extend({}, this.avoidForce,
-							{ radius: this.shape.boundRad.rad+this.avoidForce.radius }));
-					
-					this.force.doAdd(swarm.doPinToRange(0,
-							swarmWeights/sumWeights*this.maxForce))
-						.doAdd(wander.doPinToRange(0,
-							wanderWeight/sumWeights*this.maxForce))
-						.doAdd(avoid.doPinToRange(0,
-							avoidWeight/sumWeights*this.maxForce));
-				break;
-				
-				default:
-				break;
+					this.schedule.wander.wait += this.schedule.wander.delay;
 				}
-				
+				if(this.schedule.avoid.wait <= 0) {
+					this.schedule.avoid.force = Force.avoidWalls(
+						$.extend({}, this.avoid, {
+							radius: this.shape.boundRad.rad+this.avoid.radius,
+							lumens: ((this.avoid.lumens.toroid)? null
+								:	this.avoid.lumens)
+						}));
+
+					this.schedule.avoid.wait += this.schedule.avoid.delay;
+				}
+
+				this.force.doAdd(this.schedule.swarm.force.doPinToRange(0,
+						swarmWeights/sumWeights*this.maxForce))
+					.doAdd(this.schedule.wander.force.doPinToRange(0,
+						wanderWeight/sumWeights*this.maxForce))
+					.doAdd(this.schedule.avoid.force.doPinToRange(0,
+						avoidWeight/sumWeights*this.maxForce));
+
 				return Entity.prototype.update.call(this);
 			}
 		});
@@ -2092,26 +1845,24 @@
 				new Enum("passive", "aggressive", "feeding", "stunned")),
 			settings: {
 				mass: 6,
-				swarmForce: {
+				swarm: {
 					swarm: null, nearbyRad: 90, predict: 0.6,
-					weight: { separation: 0.501,
-						cohesion: 0.021, alignment: 0.414 }
+					weight: { separation: 0.601,
+						cohesion: 0.021, alignment: 0.454 }
 				},
-				wanderForce: { vel: new Vec2D(), range: 0.6,
+				wander: { vel: new Vec2D(), range: 0.6,
 					minSpeed: 0.8, weight: 1.501 },
-				avoidForce: { point: null, walls: null, radius: 70,
-					predict: 0.8, weight: 0.5 },
+				avoid: { point: null, walls: null, lumens: null, radius: 70,
+					predict: 0.8, weight: 0.75 },
+
+				schedule: {
+					swarm: { delay: 1000/10, wait: 0, force: null },
+					wander: { delay: 1000/30, wait: 0, force: null },
+					avoid: { delay: 1000/50, wait: 0, force: null }
+				},
 				maxForce: 0.006
 			}
 		});
-//	}
-
-//	ENVIRONMENT {
-		function Wall(points, color) {
-			Shape.call(this, { points: (points || []),
-				color: (color || new Color(0, 0.5, 1, 0.1)) });
-		}
-		inherit(Wall, Shape);
 //	}
 
 //	VIEWPORT {
@@ -2130,24 +1881,19 @@
 				this when the respective lumens dimension is larger */
 			this.boundRect = new AARect();
 
-			// TODO: replace with a Vec3D position (change z to zoom in/out)
-			this.zoomFactor = (settings.zoomFactor || 1);
-
 			this.walls = new QuadTree(this.boundRect.copy(), 5, 4,
 					settings.walls, function(wall) { return wall.treeItem; });
 
 			this.shapes = new QuadTree(this.boundRect.copy(), 5, 8);
-			
-			this.$canvas = $(settings.canvas);
-			this.canvas = this.$canvas[0];
-			this.context = this.canvas.getContext('2d');
 
-			settings.springForce.pointFrom = this;
 			this.springForce = settings.springForce;
+			this.zoomSpringForce = settings.zoomSpringForce;
+			this.zoomSpringForce.restLength = settings.camera.position.z;
+			this.springForce.pointFrom =
+				this.zoomSpringForce.pointFrom = this;
 
 			this.restitution = (settings.restitution || 0.75);
 			
-			this.lumens = (settings.lumens || null);
 			// TODO: change all to trees
 			this.lights = (settings.lights || []);
 			this.glows = (settings.glows || []);
@@ -2161,22 +1907,27 @@
 				normals: false
 			}, settings.debug);
 
-			this.debugColor = (settings.debugColor || new Color(0, 1, 0.3, 0.7));
-
 			this.renderDone = new Watchable();
 			//this.running = true;
+			
+			this.$container = $(settings.container);
 
-			/* In a render cycle, first update is called to clear and resize
-				the canvas, then the render-lists are populated, followed by a
-				call to render, which calls clear at the end */
+			this.renderer = new THREE.WebGLRenderer({ /*clearColor: 0x000000,
+				clearAlpha: 1, */antialias: true });
+			this.scene = new THREE.Scene();
+			this.scene.fog = new THREE.FogExp2(0xffffff);
+			this.camera = new THREE.PerspectiveCamera(60, 1, 1, 4000);
+			this.camera.position.z = settings.camera.position.z;
+			this.scene.add(this.camera);
 
 			this.resize().reposition();
+
+			this.$container.append(this.renderer.domElement);
 		}
 		$.extend(inherit(Viewport, Particle).prototype, {
 			resolve: function(dt) {
 				if(dt) {
 					Particle.prototype.resolve.call(this, dt);
-					this.resize();
 					this.reposition();
 				}
 
@@ -2185,14 +1936,36 @@
 			resize: function() {
 				/* Fit everything to the screen in question,
 					maintaining aspect ratio */
-				var width = this.$canvas.width(), height = this.$canvas.height(),
-					aspect = width/height, zoom = 1/this.zoomFactor;
+				var width = this.$container.width(), height = this.$container.height(),
+					aspect = width/height,
+					rad = Math.radians(this.camera.fov/2),
+					camSees = this.camera.position.z*Math.sin(rad)/
+						Math.sin(rad+Math.PI/2)*2;
 
-				this.boundRect.size.copy(((aspect >= 1)?
+				// TODO: make this align with boundRect properly again
+				this.camera.aspect = aspect;
+				this.camera.updateProjectionMatrix();
+
+				this.boundRect.size.copy((aspect >= 1)?
 						new Vec2D(this.minRect.size.x*aspect, this.minRect.size.y)
 					:	new Vec2D(this.minRect.size.x, this.minRect.size.y/aspect))
-					.doScale(zoom));
+				.doScale(camSees/this.boundRect.size.y);
 
+				/* DEBUG *//*
+				if(this.plane) { this.scene.remove(this.plane); }
+
+				this.plane = new THREE.Mesh(
+					new THREE.PlaneGeometry(this.boundRect.size.x,
+						this.boundRect.size.y),
+					new THREE.MeshBasicMaterial({ color: 0xff0000,
+						wireframe: true }));
+
+				this.plane.position.x = this.boundRect.pos.x+this.boundRect.size.x/2;
+				this.plane.position.y = this.boundRect.pos.y+this.boundRect.size.y/2;
+				this.scene.add(this.plane);*/
+
+				this.renderer.setSize(width, height);
+				
 				return this;
 			},
 			reposition: function() {
@@ -2200,6 +1973,13 @@
 
 				this.minRect.pos.copy(this.pos.sub(this.minRect.size.scale(0.5)));
 				this.boundRect.pos.copy(this.minRect.pos.sub(margin));
+
+				this.camera.position.x = this.pos.x;
+				this.camera.position.y = this.pos.y;
+
+				/* DEBUG *//*
+				this.plane.position.x = this.boundRect.pos.x+this.boundRect.size.x/2;
+				this.plane.position.y = this.boundRect.pos.y+this.boundRect.size.y/2;*/
 
 				return this;
 			},
@@ -2217,114 +1997,20 @@
 							((size.y >= envSize.y)? center.y : to.y));
 				}
 
-				this.springForce.factor *= this.zoomFactor;
+				this.springForce.factor /= this.camera.position.z;
 
 				this.force.doAdd(Force.dampedSpring(this.springForce));
 				this.springForce.posTo = to;
 				this.springForce.factor = factor;
 
-				return this;
-			},
-			setup: function() {
-				this.canvas.width = this.boundRect.size.x*this.zoomFactor;
-				this.canvas.height = this.boundRect.size.y*this.zoomFactor;
-				
-				/* Position of minRect is centered in the canvas - have to think
-					about this, the reverse of the direction you'd expect */
-				this.context.scale(this.zoomFactor, this.zoomFactor);
-				this.context.translate(-this.boundRect.pos.x, -this.boundRect.pos.y);
-
-				// TODO: all trees
-				this.lights.length = this.glows.length = 0;
-				this.walls.clear();
-				this.shapes.clear(true);
-
-				this.walls.constructor(this.boundRect.copy(),
-					this.walls.root.maxDepth, this.walls.root.maxKids,
-					this.walls.source, function(wall) { return wall.treeItem; });
-				this.shapes.constructor(this.boundRect.copy(),
-					this.shapes.root.maxDepth, this.shapes.root.maxKids);
-
-				return this;
-			},
-			add: function(entity) {
-				if($.isArray(entity)) {
-					for(var e = 0; e < entity.length; ++e) { this.add(entity[e]); }
-				}
-				else {
-					var shapeTreeItem = entity.shape.treeItem;
-
-					if(this.boundRect.intersects(shapeTreeItem)) {
-						this.shapes.add(entity.shape).put(shapeTreeItem);
-					}
-					// TODO: change all to trees
-					if(entity.glow && this.boundRect
-						.intersects(entity.glow.containingAARect())) {
-						this.glows.push(entity.glow);
-					}
-					if(entity.light && this.boundRect
-						.intersects(entity.light.containingAARect())) {
-						this.lights.push(entity.light);
-					}
-				}
+				/* TODO: wrap THREE.camera to achieve newtonian physics
+					when springing back to camera's default z position */
 
 				return this;
 			},
 			render: function() {
-				this.context.save();
-
-				/* Lit areas */
-				var litBodies = [];
-
-				this.context.globalCompositeOperation = 'source-over';
-
-				for(var l = 0; l < this.lights.length; ++l) {
-					var light = this.lights[l],
-						lit = ((this.shapes)?
-							this.shapes.get(light.containingAARect()) : null);
-					
-					if(lit) {
-						for(var lT = 0; lT < lit.length; ++lT) {
-							var litBody = lit[lT].item;
-
-							if(litBody.boundRad.intersects(light)) {
-								litBodies.push(litBody);
-							}
-						}
-					}
-
-					light.render(this.context);
-				}
-
-				/* Bodies - only drawn in the light */
-				this.context.globalCompositeOperation = 'source-atop';
-
-				for(var lB = 0; lB < litBodies.length; ++lB) {
-					litBodies[lB].render(this.context);
-				}
-
-				// TODO: all trees
-				/* Glowing cores - drawn everywhere */
-				this.context.globalCompositeOperation = 'destination-over';
-
-				for(var g = 0; g < this.glows.length; ++g) {
-					this.glows[g].render(this.context);
-				}
-
-				this.context.globalCompositeOperation = 'source-over';
-				var visibleWalls = this.walls.get(this.boundRect);
-				for(var w = 0; w < visibleWalls.length; ++w) {
-					visibleWalls[w].item.render(this.context);
-				}
-
-				if(this.lumens) {
-					this.context.globalCompositeOperation = 'destination-atop';
-					this.lumens.render(this.context);
-				}
-
-				this.renderDebug();
-
-				this.context.restore();
+				this.renderer.clear();
+				this.renderer.render(this.scene, this.camera);
 
 				/* Should be managed asynchronously from here,
 					as a web worker:
@@ -2339,98 +2025,33 @@
 
 				return this;
 			},
-			renderDebug: function() {
-				this.context.save();
-				this.context.globalCompositeOperation = 'source-over';
-				this.context.strokeStyle = this.debugColor.RGBAString();
-
-				var renderFuncs = [];
-
-				if(this.debug.bounds) { renderFuncs.push(this.renderBoundRad); }
-				if(this.debug.trails) { renderFuncs.push(this.renderTrail); }
-
-				for(var f = 0; f < renderFuncs.length; ++f) {
-					for(var s = 0; s < this.shapes.source.length; ++s) {
-						renderFuncs[f].call(this, this.shapes.source[s]);
-					}
+			addEntity: function(entity) {
+				if($.isArray(entity)) {
+					for(var e = 0; e < entity.length; ++e) { this.add(entity[e]); }
 				}
+				else {
+					var shapeTreeItem = entity.shape.treeItem;
 
-				if(this.debug.tree) { this.renderShapeTree(); }
-				if(this.debug.normals) { this.renderNormals(); }
+					this.scene.add(entity.shape.three);
 
-				this.context.restore();
-			},
-			renderBoundRad: function(shape) {
-				this.context.save();
-				this.context.beginPath();
-				shape.boundRad.trace(this.context);
-				this.context.stroke();
-				this.context.restore();
+					if(entity.light) { this.scene.add(entity.light.three); }
+				}
 
 				return this;
 			},
-			renderTrail: function(shape) {
-				var entity = shape.owner;
-
-				this.context.save();
-				//this.context.lineWidth = shape.boundRad.rad*2;
-				this.context.lineCap = this.context.lineJoin = "round";
-				this.context.beginPath();
-				this.context.moveTo(entity.pos.x, entity.pos.y);
-
-				for(var t = 0; t < entity.trail.length; ++t) {
-					var pos = entity.trail[t];
-					this.context.lineTo(pos.x, pos.y);
+			removeEntity: function(entity) {
+				if($.isArray(entity)) {
+					for(var e = 0; e < entity.length; ++e) { this.remove(entity[e]); }
 				}
+				else {
+					this.scene.remove(entity.shape.three);
+					this.renderer.deallocateObject(entity.shape.three);
 
-				this.context.stroke();
-				this.context.restore();
-
-				return this;
-			},
-			renderShapeTree: function() {
-				(function(node) {
-					if(node.nodes.length) {
-						for(var n = 0; n < node.nodes.length; ++n) {
-							arguments.callee.call(this, node.nodes[n]);
-						}
-					}
-					else {
-						this.context.save();
-						node.boundRect.trace(this.context);
-						this.context.stroke();
-						this.context.restore();
-					}
-				}).call(this, this.shapes.root);
-
-				return this;
-			},
-			renderNormals: function() {
-				this.context.save();
-				this.context.beginPath();
-
-				for(var w = 0; w < this.walls.source.length; ++w) {
-					var wall = this.walls.source[w];
-
-					for(var p = 0; p < wall.points.length; ++p) {
-						var a = wall.points.wrap(p-1).pos,
-							b = wall.points[p].pos,
-							edge = b.sub(a),
-							l = edge.mag();
-
-						if(l) {
-							var half = edge.scale(0.5),
-								center = a.add(half),
-								normal = edge.perp().doScale(15/l);
-
-							this.context.moveTo(center.x, center.y);
-							this.context.lineTo(center.x+normal.x, center.y+normal.y);
-						}
+					if(entity.light) {
+						this.scene.remove(entity.light.three);
+						this.renderer.deallocateObject(entity.light.three);
 					}
 				}
-
-				this.context.stroke();
-				this.context.restore();
 
 				return this;
 			}
@@ -2441,9 +2062,12 @@
 				show you thought of it... */
 		});
 		Viewport.settings = {
-			size: new Vec2D(720, 720), mass: 200,
+			size: new Vec2D(720, 720), mass: 120,
 			springForce: { pointFrom: null, posTo: null,
-				factor: 0.004, restLength: 0, damping: 0.7 }
+				factor: 0.9, restLength: 0, damping: 0.8 },
+			zoomSpringForce: { pointFrom: null, posTo: null,
+				factor: 0.9, restLength: 0, damping: 0.8 },
+			camera: { position: { z: 1000 } }
 		};
 //	}
 	
@@ -2460,17 +2084,18 @@
 				range: new Watchable(false),
 				pause: new Watchable(false)
 			};
+
+			var viewport = this.lumens.viewport;
+			$(self).on('resize', function(e) { viewport.resize.call(viewport, e); });
 		}
 		$.extend(Controller.prototype, {
 			eventPos: function(e) {
-				var $canvas = this.lumens.viewport.$canvas,
-					canvas = this.lumens.viewport.canvas,
-					offset = $canvas.offset();
+				var $container = this.lumens.viewport.$container,
+					offset = $container.offset();
 				
-				/* Note: the canvas element's dimensions are not the same as its context's dimensions */
-				return new Vec2D(
-					(e.pageX-offset.left)/$canvas.width()*canvas.width,
-					(e.pageY-offset.top)/$canvas.height()*canvas.height);
+				// NDC coordinates
+				return new Vec2D(((e.pageX-offset.left)/$container.width())*2-1,
+						-((e.pageY-offset.top)/$container.height())*2+1);
 			}
 		});
 		// Factory method
@@ -2488,8 +2113,8 @@
 			this.moveKey = {
 				left: { input: new Vec2D(-1, 0), down: false },
 				right: { input: new Vec2D(1, 0), down: false },
-				up: { input: new Vec2D(0, -1), down: false },
-				down: { input: new Vec2D(0, 1), down: false }
+				up: { input: new Vec2D(0, 1), down: false },
+				down: { input: new Vec2D(0, -1), down: false }
 			};
 
 			this.move = new Vec2D();	// Sum of all move key inputs
@@ -2499,140 +2124,153 @@
 				If other elements are on the page, then they must catch and
 				stop propogation of events meant for them
 				Pausing the game relinquishes global listening */
-			$(document).off('.lumens').on(this.handlers, { ctrl: this });
+			$(document).off('.lumens').on(this.handlers.keyboard, { ctrl: this });
+			this.lumens.viewport.$container.off('.lumens')
+				.on(this.handlers.mouse, { ctrl: this });
 		}
 		$.extend(inherit(MKController, Controller).prototype, {
 			handlers: {
-				'mousedown.lumens': function(e) { e.data.ctrl.events.attack.thing(true); },
-				'mouseup.lumens': function(e) { e.data.ctrl.events.attack.thing(false); },
-				'mousemove.lumens': function(e) {
-					var ctrl = e.data.ctrl;
-					ctrl.mousePos = ctrl.eventPos(e);
-					ctrl.events.aim.thing(ctrl.mousePos.sub(ctrl.lumens.player.pos)
-						.doUnit());
-				},
-				'mousewheel.transform DOMMouseScroll.transform': function(event) {
-					/* Normalise the wheeldata - http://www.switchonthecode.com/tutorials/javascript-tutorial-the-scroll-wheel */
-					var ctrl = event.data.ctrl,
-						e = event.originalEvent,
-						wheel = 1+(($.isNumeric(e.wheelDelta))?
-							e.wheelDelta : -e.detail*40)*0.0006;
+				mouse: {
+					'mousedown.lumens': function(e) { e.data.ctrl.events.attack.thing(true); },
+					'mouseup.lumens': function(e) { e.data.ctrl.events.attack.thing(false); },
+					'mousemove.lumens': function(e) {
+						var ctrl = e.data.ctrl;
+						ctrl.mousePos = ctrl.eventPos(e);
+						ctrl.events.aim.thing(ctrl.mousePos.sub(ctrl.lumens.player.pos)
+							.doUnit());
+					},
+					'mousewheel.transform DOMMouseScroll.transform': function(event) {
+						/* Normalise the wheeldata - http://www.switchonthecode.com/tutorials/javascript-tutorial-the-scroll-wheel */
+						var ctrl = event.data.ctrl,
+							e = event.originalEvent,
+							wheel = 1+(($.isNumeric(e.wheelDelta))?
+								e.wheelDelta : -e.detail*40)*0.0006;
 
-					ctrl.lumens.viewport.zoomFactor *= wheel;
-				},
-				'keydown.lumens': function(e) {
-					var ctrl = e.data.ctrl, caught = false;
-
-					switch(e.which) {
-					// left, a, j
-					case 37: case 65/*: case 74*/:
-						ctrl.startMove(ctrl.moveKey.left);
-						caught = true;
-					break;
-					
-					// right, d, l
-					case 39: case 68/*: case 76*/:
-						ctrl.startMove(ctrl.moveKey.right);
-						caught = true;
-					break;
-					
-					// up, w, i
-					case 38: case 87/*: case 73*/:
-						ctrl.startMove(ctrl.moveKey.up);
-						caught = true;
-					break;
-					
-					// down, s, k
-					case 40: case 83/*: case 75*/:
-						ctrl.startMove(ctrl.moveKey.down);
-						caught = true;
-					break;
-					
-					// space
-					case 32:
-						ctrl.events.attack.thing(true);
-						caught = true;
-					break;
-					
-					// x, m
-					case 88: case 77:
-						ctrl.events.beam.thing(true);
-						caught = true;
-					break;
-					
-					// c, n
-					case 67: case 78:
-						ctrl.events.repel.thing(true);
-						caught = true;
-					break;
-					
-					// v, b
-					case 86: case 66:
-						ctrl.events.range.thing(true);
-						caught = true;
-					break;
-					
-					default: break;
+						ctrl.lumens.viewport.camera.position.z /= wheel;
+						ctrl.lumens.viewport.resize();
 					}
-
-					return !caught;
 				},
-				'keyup.lumens': function(e) {
-					var ctrl = e.data.ctrl, caught = false;
+				keyboard: {
+					'keydown.lumens': function(e) {
+						var ctrl = e.data.ctrl, caught = false;
 
-					switch(e.which) {
-					// left, a, j
-					case 37: case 65/*: case 74*/:
-						ctrl.endMove(ctrl.moveKey.left);
-						caught = true;
-					break;
-					
-					// right, d, l
-					case 39: case 68/*: case 76*/:
-						ctrl.endMove(ctrl.moveKey.right);
-						caught = true;
-					break;
-					
-					// up, w, i
-					case 38: case 87/*: case 73*/:
-						ctrl.endMove(ctrl.moveKey.up);
-						caught = true;
-					break;
-					
-					// down, s, k
-					case 40: case 83/*: case 75*/:
-						ctrl.endMove(ctrl.moveKey.down);
-						caught = true;
-					break;
-					
-					// space
-					case 32:
-						ctrl.events.attack.thing(false);
-						caught = true;
-					break;
-					
-					// x, m
-					case 88: case 77:
-						ctrl.events.beam.thing(false);
-						caught = true;
-					break;
-					
-					// c, n
-					case 67: case 78:
-						ctrl.events.repel.thing(false);
-						caught = true;
-					break;
-					
-					// v, b
-					case 86: case 66:
-						ctrl.events.range.thing(false);
-						caught = true;
-					break;
-					
-					default: break;
+						switch(e.which) {
+						// left, a, j
+						case 37: case 65/*: case 74*/:
+							ctrl.startMove(ctrl.moveKey.left);
+							caught = true;
+						break;
+						
+						// right, d, l
+						case 39: case 68/*: case 76*/:
+							ctrl.startMove(ctrl.moveKey.right);
+							caught = true;
+						break;
+						
+						// up, w, i
+						case 38: case 87/*: case 73*/:
+							ctrl.startMove(ctrl.moveKey.up);
+							caught = true;
+						break;
+						
+						// down, s, k
+						case 40: case 83/*: case 75*/:
+							ctrl.startMove(ctrl.moveKey.down);
+							caught = true;
+						break;
+						
+						// space
+						case 32:
+							ctrl.events.attack.thing(true);
+							caught = true;
+						break;
+						
+						// x, m
+						case 88: case 77:
+							ctrl.events.beam.thing(true);
+							caught = true;
+						break;
+						
+						// c, n
+						case 67: case 78:
+							ctrl.events.repel.thing(true);
+							caught = true;
+						break;
+						
+						// v, b
+						case 86: case 66:
+							ctrl.events.range.thing(true);
+							caught = true;
+						break;
+						
+						default: break;
+						}
+
+						return !caught;
+					},
+					'keyup.lumens': function(e) {
+						var ctrl = e.data.ctrl, caught = false;
+
+						switch(e.which) {
+						// left, a, j
+						case 37: case 65/*: case 74*/:
+							ctrl.endMove(ctrl.moveKey.left);
+							caught = true;
+						break;
+						
+						// right, d, l
+						case 39: case 68/*: case 76*/:
+							ctrl.endMove(ctrl.moveKey.right);
+							caught = true;
+						break;
+						
+						// up, w, i
+						case 38: case 87/*: case 73*/:
+							ctrl.endMove(ctrl.moveKey.up);
+							caught = true;
+						break;
+						
+						// down, s, k
+						case 40: case 83/*: case 75*/:
+							ctrl.endMove(ctrl.moveKey.down);
+							caught = true;
+						break;
+						
+						// space
+						case 32:
+							ctrl.events.attack.thing(false);
+							caught = true;
+						break;
+						
+						// x, m
+						case 88: case 77:
+							ctrl.events.beam.thing(false);
+							caught = true;
+						break;
+						
+						// c, n
+						case 67: case 78:
+							ctrl.events.repel.thing(false);
+							caught = true;
+						break;
+						
+						// v, b
+						case 86: case 66:
+							ctrl.events.range.thing(false);
+							caught = true;
+						break;
+						
+						// p, enter
+						case 80: case 13:
+							ctrl.events.pause.thing(!ctrl.events.pause.thing());
+							caught = true;
+						break;
+						
+						default: break;
+						}
+
+						return !caught;
 					}
-
-					return !caught;
 				}
 			},
 			startMove: function(key) {
@@ -2668,7 +2306,7 @@
 			this.bindings = [];	// { touch, event }
 
 			// Bind events
-			this.lumens.viewport.$canvas.off('.lumens')
+			this.lumens.viewport.$container.off('.lumens')
 				.on(this.handlers, { ctrl: this });
 		}
 		$.extend(inherit(TouchController, Controller).prototype, {
@@ -2784,7 +2422,7 @@
 					/*var ctrl = event.data.ctrl,
 						e = event.originalEvent;
 
-					ctrl.lumens.viewport.zoomFactor *= event.scale;*/
+					ctrl.lumens.viewport.camera.position.z *= event.scale;*/
 				}
 			},
 			bindingWithTouch: function(touch) {
@@ -2810,19 +2448,28 @@
 				var walls = [];
 
 				for(var w = 0; w < JSON.length; ++w) {
-					walls.push(new Wall(Network.loadWall(JSON[w])));
+					walls.push(Network.loadWall(JSON[w]));
 				}
 
 				return walls;
 			},
 			loadWall: function(JSON) {
-				var points = [];
+				var geometry = new THREE.Geometry();
 
-				for(var p = 0; p < JSON.points.length; ++p) {
-					points.push(new Particle({ pos: new Vec2D().copy(JSON.points[p]) }));
+				for(var p = -1; p < JSON.points.length; ++p) {
+					var point = JSON.points.wrap(p);
+
+					// TODO: finish this...
+					geometry.vertices.push(new THREE.Vertex(
+						new THREE.Vector3(point.x, point.y, 0)));
 				}
 
-				return points;
+				return new Shape({
+					three: new THREE.Line(geometry,
+						new THREE.LineBasicMaterial({ color: 0xffffff,
+							opacity: 1, linewidth: 3 })),
+					owner: new Particle({ pos: new Vec2D().copy(JSON.position) })
+				});
 			}
 		};
 //	}
@@ -2834,27 +2481,39 @@
 			var settings = $.extend(true, {}, Lumens.settings, options);
 
 			this.boundRect = new AARect(null, settings.size);
-			this.color = (settings.color || new Color());
 			this.toroid = (settings.toroid || false);
 
 			this.walls = new QuadTree(this.boundRect.copy(), 5, 8, settings.walls,
 				function(wall) { return wall.treeItem; });
-			// TODO: remove entities - wasted second quadtree, no point
-			this.entities = new QuadTree(this.boundRect.copy(), 5, 8, settings.entities,
-				function(entity) { return entity.treeItem; });
 			this.swarm = new QuadTree(this.boundRect.copy(), 5, 8, settings.swarm,
 				function(predator) { return predator.treeItem; });
 			
 			this.player = new Firefly({ pos: this.boundRect.size.scale(0.5) });
-			this.entities.add(this.player);
-			
-			for(var p = 0; p < settings.predators.num; ++p) {
-				this.addPredator();
-			}
 
 			this.viewport = new Viewport($.extend({
 				springForce: { posTo: this.player.pos }, walls: this.walls.source,
 				lumens: this, pos: this.player.pos.copy() }, settings.viewport));
+			
+
+			this.plane = new THREE.Mesh(
+				new THREE.PlaneGeometry(this.boundRect.size.x,
+					this.boundRect.size.y),
+				new THREE.MeshBasicMaterial({ color: 0x000000,
+					wireframe: true }));
+
+			this.plane.position.x = this.boundRect.size.x/2;
+			this.plane.position.y = this.boundRect.size.y/2;
+			this.viewport.scene.add(this.plane);
+
+			for(var w = 0; w < this.walls.source.length; ++w) {
+				this.viewport.scene.add(this.walls.source[w].three);
+			}
+
+			this.viewport.addEntity(this.player);
+			
+			for(var p = 0; p < settings.predators.num; ++p) {
+				this.addPredator();
+			}
 
 			this.controller = Controller.make(this);
 
@@ -2867,13 +2526,8 @@
 
 			this.controller.events.pause.watch(invoke, this, this.pause);
 			
-			/* If rendering is to be done asynchronously, a render tree
-				should be maintained for each render, while updates may
-				occur more frequently between these frames
-				Finer time steps for updates - Heavy deep copy of quadtree
-			this.viewport.renderDone.watch((function() {
-				this.viewport.shape ... this.entities;
-			}).call, this); */
+			/* If rendering is to be done asynchronously
+			this.viewport.renderDone.watch((function() {  }).call, this); */
 
 			this.time = Date.now();
 			this.state = Lumens.states.running;
@@ -2895,63 +2549,50 @@
 
 				if(this.state === Lumens.states.running) {
 					/* Clear the Quadtrees */
-					this.entities.clear();
 					this.swarm.clear();
 					
 					/* Resolve everything and populate Quadtrees */
-					for(var r = 0; r < this.entities.source.length; ++r) {
-						var rE = this.entities.source[r].resolve(dt),
-							rTI = rE.treeItem;
-
-						this.entities.put(rTI);
-						
-						if(instance(rE, Predator)) { this.swarm.put(rTI); }
+					for(var r = 0; r < this.swarm.source.length; ++r) {
+						this.swarm.put(this.swarm.source[r]
+							.resolve(dt).treeItem);
 					}
+
+					this.player.resolve(dt);
 
 					/* Update everything:
 						collision resolution, force accumulation,
 						anything querying the Quadtrees */
-					for(var u = 0; u < this.entities.source.length; ++u) {
-						var uE = this.entities.source[u],
-							uTI = uE.treeItem,
-							predator = instance(uE, Predator);
+					for(var u = 0; u < this.swarm.source.length; ++u) {
+						var uE = this.swarm.source[u], uTI = uE.treeItem;
 						
-						if(Collision.Entity.check(uE, { entities: this.entities,
-								walls: this.walls, lumens: this }, dt)
-							.length) {
-							this.entities.clear(uTI);
-							if(predator) { this.swarm.clear(uTI); }
-
+						if(Collision.Entity.check(uE, { swarm: this.swarm,
+								player: this.player, walls: this.walls,
+								lumens: this }, dt).length) {
 							// Get the new tree item
-							uTI = uE.treeItem;
-							this.entities.put(uTI);
-							if(predator) { this.swarm.put(uTI); }
+							this.swarm.clear(uTI).put(uE.treeItem);
 						}
 
 						uE.update(dt);
 					}
+					
+					Collision.Entity.check(this.player, { swarm: this.swarm,
+						walls: this.walls, lumens: this }, dt);
+
+					this.player.update(dt);
+
+					/* Render */
+					/* Should be done asynchronously, through web workers:
+					// Render called in viewport
+					if(this.running) {
+						setTimeout(this.step.call, 1000/60, this);
+					} */
+
+					this.viewport.render();
 				}
-
-				/* Render */
-				/* Should be done asynchronously, through web workers:
-				// Render called in viewport
-				if(this.running) {
-					setTimeout(this.step.call, 1000/60, this);
-				} */
-
-				this.viewport.setup().add(this.entities.source).render();
-
-				this.frames++;
 
 				requestAnimationFrame(function() { lumens.step(); });
 
 				return this;
-			},
-			render: function(context) {
-				context.save();
-				context.fillStyle = this.color.RGBAString();
-				context.fillRect(0, 0, this.boundRect.size.x, this.boundRect.size.y);
-				context.restore();
 			},
 			pause: function(paused) {
 				if(this.state != Lumens.states.fin) {
@@ -2962,24 +2603,32 @@
 			},
 			addPredator: function() {
 				var angle = Math.random()*2*Math.PI,
+					schedule = Predator.settings.schedule,
 					predator = new Predator({
-							swarmForce: { swarm: this.swarm },
-							avoidForce: { walls: this.walls },
+							swarm: { swarm: this.swarm },
+							avoid: { walls: this.walls, lumens: this },
 							pos: new Vec2D(Math.random()*this.boundRect.size.x,
 								Math.random()*this.boundRect.size.y),
 							angle: new Vec2D(Math.cos(angle),
-									Math.sin(angle))
+									Math.sin(angle)),
+							schedule: {
+								swarm: { wait: Math.random()*schedule.swarm.delay },
+								wander: { wait: Math.random()*schedule.wander.delay },
+								avoid: { wait: Math.random()*schedule.avoid.delay }
+							}
 						});
 				
-				this.entities.add(predator);
 				this.swarm.add(predator);
+
+				this.viewport.addEntity(predator);
 
 				return this;
 			},
 			removePredator: function(predator) {
 				this.swarm.source.splice(this.swarm.source.indexOf(predator), 1);
-				this.entities.source.splice(this.entities.source.indexOf(predator), 1);
 				// Trees get cleared anyway...
+
+				this.viewport.removeEntity(predator);
 
 				return this;
 			},
@@ -3001,122 +2650,28 @@
 			singleton: null,*/
 			settings: {
 				size: new Vec2D(720, 720), sizeRange: new Vec2D(3, 3),
-				predators: { num: 300 }
+				predators: { num: 0 }
 			},
 			states: new Enum('running', 'paused', 'fin')
 		});
 //	}
-				
 	
 //	DEBUG {
+		self.generateTestEnvironment = function(num, rad, random) {
+			var str = "";
+			Circle.generateVecs(num, rad, function(v) {
+				str = '{ "x": '+(v.x+Math.random()*random)+
+						', "y": '+(v.y+Math.random()*random)+' },\n'+str;
+			});
+			return str;
+		};
+
 		/* GUI for testing */
 		function addGUI(lumens) {
-			var load = {
-					"preset": "Lumens",
-					"closed": false,
-					"remembered": {
-						"Lumens": {
-							"0": {
-								"maxForce": 0.03,
-								"damping": 0.995
-							},
-							"1": {
-								"rad": 100
-							},
-							"2": {
-								"color": {
-									"r": 200,
-									"g": 200,
-									"b": 200,
-									"a": 0.7
-								}
-							},
-							"3": {
-								"color": {
-									"r": 255,
-									"g": 255,
-									"b": 255,
-									"a": 1
-								}
-							},
-							"4": {
-								"num": 300
-							},
-							"5": {
-								"maxForce": 0.005
-							},
-							"6": {
-								"predict": 0.6,
-								"nearbyRad": 101.10000000000001
-							},
-							"7": {
-								"separation": 0.501,
-								"cohesion": 0.021,
-								"alignment": 0.414
-							},
-							"8": {
-								"wander": 1.494,
-								"minSpeed": 0.8
-							},
-							"9": {
-								"invMass": 0.005
-							},
-							"10": {
-								"bounds": true,
-								"trails": true,
-								"health": false,
-								"states": false,
-								"tree": true
-							},
-							"11": {
-								"damping": 0.7,
-								"factor": 0.004
-							},
-							"12": {
-								"toroid": false
-							},
-							"13": {
-								"x": 3000,
-								"y": 2000
-							}
-						}
-					},
-					"folders": {
-						"Player": {
-							"preset": "Default",
-							"closed": true,
-							"folders": {
-								"Light": {
-									"preset": "Default",
-									"closed": true,
-									"folders": {}
-								}
-							}
-						},
-						"Predators": {
-							"preset": "Default",
-							"closed": false,
-							"folders": {
-								"AI": {
-									"preset": "Default",
-									"closed": false,
-									"folders": {}
-								}
-							}
-						},
-						"Viewport": {
-							"preset": "Default",
-							"closed": true,
-							"folders": {}
-						},
-						"Environment": {
-							"preset": "Default",
-							"closed": true,
-							"folders": {}
-						}
-					}
-				},
+			var load = {},
 				gui = new dat.GUI({ load: load, preset: 'Lumens' });
+
+			self.lumens = lumens;
 
 			var stats = new Stats(), statsBox = stats.getDomElement();
 
@@ -3126,34 +2681,11 @@
 			$("#main").after(statsBox);
 
 			setTimeout(function(t) { stats.update(); setTimeout(arguments.callee, t); },
-				1000/20);
+				1000/60);
 
-			var playerFolder = gui.addFolder("Player"),
-				predatorFolder = gui.addFolder("Predators"),
+			var predatorFolder = gui.addFolder("Predators"),
 				viewportFolder = gui.addFolder("Viewport"),
-				environmentFolder = gui.addFolder("Environment"),
-
-				/* Note that the alpha can't be 1 to work with dat.GUI */
-				player = { color: lumens.player.shape.color.toRGBA() },
-				light = { color: lumens.player.light.color.toRGBA() };
-
-			gui.remember(lumens.player);
-			gui.remember(lumens.player.light);
-			gui.remember(player);
-			gui.remember(light);
-			
-			playerFolder.addColor(player, "color").onChange(function(c) {
-				lumens.player.shape.color.fromRGBA(c.r, c.g, c.b, c.a);
-			});
-			playerFolder.add(lumens.player, 'maxForce', 0.01, 1.01).step(0.01).listen();
-			playerFolder.add(lumens.player, 'damping', 0.001, 1.000).step(0.001).listen();
-
-			var lightFolder = playerFolder.addFolder("Light");
-
-			lightFolder.add(lumens.player.light, "rad", 0, 1000).listen();
-			lightFolder.addColor(light, "color").onChange(function(c) {
-				lumens.player.light.color.fromRGBA(c.r, c.g, c.b, c.a);
-			});
+				environmentFolder = gui.addFolder("Environment");
 
 			var predSett = { num: lumens.swarm.source.length };
 
@@ -3174,35 +2706,35 @@
 
 			function setWeight(weight, influence) {
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].swarmForce.weight[influence] = weight;
+					lumens.swarm.source[p].swarm.weight[influence] = weight;
 				}
 			}
 
 			gui.remember(Predator.settings);
-			gui.remember(Predator.settings.swarmForce);
-			gui.remember(Predator.settings.swarmForce.weight);
+			gui.remember(Predator.settings.swarm);
+			gui.remember(Predator.settings.swarm.weight);
 
-			AIFolder.add(Predator.settings.swarmForce.weight, "separation",
+			AIFolder.add(Predator.settings.swarm.weight, "separation",
 			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "separation");
 			});
-			AIFolder.add(Predator.settings.swarmForce.weight, "cohesion",
+			AIFolder.add(Predator.settings.swarm.weight, "cohesion",
 			0, 0.1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "cohesion");
 			});
-			AIFolder.add(Predator.settings.swarmForce.weight, "alignment",
+			AIFolder.add(Predator.settings.swarm.weight, "alignment",
 			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "alignment");
 			});
 
-			AIFolder.add(Predator.settings.swarmForce, "predict",
+			AIFolder.add(Predator.settings.swarm, "predict",
 			0, 5).step(0.001).listen().onChange(function(predict) {
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].swarmForce.predict = predict;
+					lumens.swarm.source[p].swarm.predict = predict;
 				}
 			});
 
-			var wander = Predator.settings.wanderForce,
+			var wander = Predator.settings.wander,
 				wanderSettings = { wander: wander.weight, minSpeed: wander.minSpeed };
 			
 			gui.remember(wanderSettings);
@@ -3212,7 +2744,7 @@
 				wander.weight = weight;
 
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].wanderForce.weight = weight;
+					lumens.swarm.source[p].wander.weight = weight;
 				}
 			});
 			AIFolder.add(wanderSettings, "minSpeed", 0, 10).step(0.001)
@@ -3220,11 +2752,11 @@
 				wander.minSpeed = speed;
 
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].wanderForce.minSpeed = speed;
+					lumens.swarm.source[p].wander.minSpeed = speed;
 				}
 			});
 
-			var avoid = Predator.settings.avoidForce,
+			var avoid = Predator.settings.avoid,
 				avoidSettings = { avoid: avoid.weight, avoidRadius: avoid.radius };
 			
 			gui.remember(avoidSettings);
@@ -3234,7 +2766,7 @@
 				avoid.weight = weight;
 
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].avoidForce.weight = weight;
+					lumens.swarm.source[p].avoid.weight = weight;
 				}
 			});
 			AIFolder.add(avoidSettings, "avoidRadius", 0, 100).step(0.001)
@@ -3242,14 +2774,14 @@
 				avoid.radius = radius;
 
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].avoidForce.radius = radius;
+					lumens.swarm.source[p].avoid.radius = radius;
 				}
 			});
 			
-			AIFolder.add(Predator.settings.swarmForce, "nearbyRad", 0, 1000)
+			AIFolder.add(Predator.settings.swarm, "nearbyRad", 0, 1000)
 			.step(0.05).listen().onChange(function(rad) {
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].swarmForce.nearbyRad = rad;
+					lumens.swarm.source[p].swarm.nearbyRad = rad;
 				}
 			});
 			
@@ -3264,20 +2796,40 @@
 			gui.remember(lumens.viewport.debug);
 			gui.remember(lumens.viewport.springForce);
 
-			for(var s in lumens.viewport.debug) {
-				viewportFolder.add(lumens.viewport.debug, s);
-			}
-
-			viewportFolder.add(lumens.viewport.springForce, "damping", 0, 1);
-			viewportFolder.add(lumens.viewport.springForce, "factor", 0, 1);
-			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1);
+			viewportFolder.add(lumens.viewport.springForce, "damping", 0, 1).listen();
+			viewportFolder.add(lumens.viewport.springForce, "factor", 0, 1).listen();
+			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1).listen();
 
 
 			gui.remember(lumens);
 			gui.remember(lumens.boundRect.size);
 
-			environmentFolder.add(lumens.boundRect.size, "x").listen();
-			environmentFolder.add(lumens.boundRect.size, "y").listen();
+			environmentFolder.add(lumens.boundRect.size, "x").listen()
+			.onChange(function(w) {
+				lumens.viewport.scene.remove(lumens.plane);
+
+				lumens.plane = new THREE.Mesh(
+					new THREE.PlaneGeometry(w, lumens.boundRect.size.y),
+					new THREE.MeshBasicMaterial({ color: 0x000000,
+						wireframe: true }));
+
+				lumens.plane.position.x = lumens.boundRect.size.x/2;
+				lumens.plane.position.y = lumens.boundRect.size.y/2;
+				lumens.viewport.scene.add(lumens.plane);
+			});
+			environmentFolder.add(lumens.boundRect.size, "y").listen()
+			.onChange(function(h) {
+				lumens.viewport.scene.remove(lumens.plane);
+
+				lumens.plane = new THREE.Mesh(
+					new THREE.PlaneGeometry(lumens.boundRect.size.x, h),
+					new THREE.MeshBasicMaterial({ color: 0x000000,
+						wireframe: true }));
+
+				lumens.plane.position.x = lumens.boundRect.size.x/2;
+				lumens.plane.position.y = lumens.boundRect.size.y/2;
+				lumens.viewport.scene.add(lumens.plane);
+			});
 			environmentFolder.add(lumens, "toroid").listen();
 
 			//gui.close();
@@ -3287,11 +2839,11 @@
 //	}
 
 	$(function() {
-		$.getJSON("js/test_environment.json", function(JSON) {
+		$.getJSON("js/test_environment_small.json", function(JSON) {
 			var lumens = new Lumens({
 				size: new Vec2D(3000, 2000),
 				walls: Network.loadWalls(JSON),
-				viewport: { canvas: '#lumens',
+				viewport: { container: '#main',
 					settings: { trails: true, bounds: true } }
 			});
 
