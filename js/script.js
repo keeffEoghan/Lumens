@@ -1,4 +1,5 @@
 /* Author: Eoghan O'Keeffe */
+// TODO: change name to GLOW?
 
 (function($) {
 //	UTIL {
@@ -337,6 +338,11 @@
 				this.root.clear(item);
 				return this;
 			}
+			/* TODO: implement a function to return a GLSL string
+				representation of the tree
+
+				Get all nodes with kids (pulling an accumulated list of
+				borderKids down as you go for boundsNodes), and */
 		});
 
 
@@ -627,6 +633,24 @@
 			}
 		});
 
+		
+		// Simple scheduling
+		function Schedule(wait, last) {
+			this.wait = (wait || 0);
+			this.last = (last || 0);
+		}
+		$.extend(Schedule.prototype, {
+			check: function(time) { return (time-this.last >= this.wait); },
+			copy: function(other) {
+				if(other) {
+					this.wait = other.wait;
+					this.last = other.last;
+					return this;
+				}
+				else { return new this.constructor(this.wait, this.last); }
+			}
+		});
+
 
 		// For touchscreen devices
 		function Thumbstick(rad, unit) {
@@ -805,414 +829,368 @@
 				}
 			}
 		});
+//	}
 
-	/* TODO: provide simpler geometry for testing against collisions?
-		Or use normal maps to increase detail on what's actually
-		simple geometry? */
-	//	COLLISIONS {
-			// Convenience
-			function Collision(self, other, normal, penetration, dt) {
-				this.self = self;
-				this.other = other;
-				this.normal = (normal || new Vec2D());
-				this.penetration = (penetration || 0);
-				this.dt = (dt || 0);
+/* TODO: provide simpler geometry for testing against collisions?
+	Or use normal maps to increase detail on what's actually
+	simple geometry? */
+//	COLLISIONS {
+		// Convenience
+		function Collision(self, other, normal, penetration, dt) {
+			this.self = self;
+			this.other = other;
+			this.normal = (normal || new Vec2D());
+			this.penetration = (penetration || 0);
+			this.dt = (dt || 0);
 
-				this.vector = null;
-				this.updateVector();
-			}
-			$.extend(Collision.prototype, {
-				copy: function(other) {
-					if(other) {
-						return new this.constructor(this.self, this.other,
-								this.normal, this.penetration, this.dt);
-					}
-					else {
-						this.constructor.call(this, other.self, other.other,
-							other.normal, other.penetration, other.dt);
+			this.vector = null;
+			this.updateVector();
+		}
+		$.extend(Collision.prototype, {
+			copy: function(other) {
+				if(other) {
+					return new this.constructor(this.self, this.other,
+							this.normal, this.penetration, this.dt);
+				}
+				else {
+					this.constructor.call(this, other.self, other.other,
+						other.normal, other.penetration, other.dt);
 
-						return this;
-					}
-				},
-				swap: function() { return this.copy().doSwap(); },
-				doSwap: function() {
-					var other = this.self;
-
-					this.self = this.other;
-					this.other = other;
-					this.normal.doScale(-1);
-					this.updateVector();
-
-					return this;
-				},
-				updateVector: function() {
-					this.vector = this.normal.scale(this.penetration);
 					return this;
 				}
-			});
-			/* TODO: add a boolean flag for broad/narrow collision
-				detection to each check - only broad will be used outside
-				the visible/frequently updated area */
-			$.extend(Collision, {
-				Circle: {
-					checkLine: function(circle, a, b) {
-						var collision = null;
+			},
+			swap: function() { return this.copy().doSwap(); },
+			doSwap: function() {
+				var other = this.self;
 
-						/* If the angle between the vectors of
-							(1) the edge's normal and (2) the vector from the
-							circle's center 'c' to a point 'a' on the edge is
-							perpendicular, then 'c' is on the edge (for infinite edge)
-								(c-a).n < 0 if p is outside the edge
-								(c-a).n = 0 if p is on the edge
-								(c-a).n > 0 if p is inside the edge
-							
-							Adjusting for the circle's radius gives:
-								penetration = (c-a).n+rad */
-						/*
-						var edge = b.sub(a),
-							l = edge.mag();
+				this.self = this.other;
+				this.other = other;
+				this.normal.doScale(-1);
+				this.updateVector();
 
-						if(l) {
-							var vec = a.add(edge.scale(0.5))
-									.sub(circle.pos);
+				return this;
+			},
+			updateVector: function() {
+				this.vector = this.normal.scale(this.penetration);
+				return this;
+			}
+		});
+		/* TODO: add a boolean flag for broad/narrow collision
+			detection to each check - only broad will be used outside
+			the visible/frequently updated area */
+		$.extend(Collision, {
+			Circle: {
+				checkLine: function(circle, a, b) {
+					var collision = null;
 
-							if(vec.mag()-circle.rad <= l/2) {
-								var normal = edge.doScale(1/l).perp(),
-									penetration = vec.dot(normal)+circle.rad;
+					/* If the angle between the vectors of
+						(1) the edge's normal and (2) the vector from the
+						circle's center 'c' to a point 'a' on the edge is
+						perpendicular, then 'c' is on the edge (for infinite edge)
+							(c-a).n < 0 if p is outside the edge
+							(c-a).n = 0 if p is on the edge
+							(c-a).n > 0 if p is inside the edge
+						
+						Adjusting for the circle's radius gives:
+							penetration = (c-a).n+rad */
+					/*
+					var edge = b.sub(a),
+						l = edge.mag();
 
-								if(0 < penetration &&
-									penetration < 2*circle.rad) {
-									collision = new Collision(circle, [a, b],
-										normal, penetration);
-								}
+					if(l) {
+						var vec = a.add(edge.scale(0.5))
+								.sub(circle.pos);
+
+						if(vec.mag()-circle.rad <= l/2) {
+							var normal = edge.doScale(1/l).perp(),
+								penetration = vec.dot(normal)+circle.rad;
+
+							if(0 < penetration &&
+								penetration < 2*circle.rad) {
+								collision = new Collision(circle, [a, b],
+									normal, penetration);
 							}
-						}*/
+						}
+					}*/
 
-						/* The closest point 'p' on the edge to the circle's
-							center 'c' - given by the start 'a' of the edge plus
-							the dot projection 't' of 'c' onto the edge - indicates
-							a collision if its distance to the circle's center is
-							less than the circle's radius (for an infinite edge).
-							The range may be limited to the segment by limiting 't' */
-						var line = b.sub(a), vec = circle.pos.sub(a),
-							l = line.mag(), penSq = 0;
+					/* The closest point 'p' on the edge to the circle's
+						center 'c' - given by the start 'a' of the edge plus
+						the dot projection 't' of 'c' onto the edge - indicates
+						a collision if its distance to the circle's center is
+						less than the circle's radius (for an infinite edge).
+						The range may be limited to the segment by limiting 't' */
+					var line = b.sub(a), vec = circle.pos.sub(a),
+						l = line.mag(), penSq = 0;
 
-						if(l) {
-							var t = Math.pinToRange(-circle.rad,
-									vec.dot(line.doScale(1/l)), l+circle.rad),
+					if(l) {
+						var t = vec.dot(line.doScale(1/l));
 
-								closest = a.add(line.scale(t)),
+						if(-circle.rad <= t && t <= l+circle.rad) {
+							var closest = a.add(line.scale(t)),
 								toCenter = circle.pos.sub(closest),
 								lSq = toCenter.magSq();
-							
+						
 							penSq = circle.radSq-lSq;
 						}
-						else { penSq = circle.radSq-vec.magSq(); }
-
-						if(penSq > 0) {
-							collision = new Collision(circle, [a, b],
-								line.doPerp(), Math.sqrt(penSq));
-						}
-
-						return collision;
+						else { penSq = 0; }
 					}
-				},
-				Shape: {
-					// colliders: { QuadTree shapes, Lumens lumens, QuadTree walls }
-					check: function(shape, colliders, dt, callback, args) {
-						var collisions = [], treeItem = shape.treeItem;
+					else { penSq = circle.radSq-vec.magSq(); }
 
-						// TODO: fine collision detection
-						if(colliders.shapes) {
-							for(var nearby = colliders.shapes.get(treeItem),
-								n = 0; n < nearby.length; ++n) {
-								var shapeCollision = this.checkShape(shape,
-										nearby[n].item);
-
-								if(shapeCollision) {
-									shapeCollision.dt = dt;
-									collisions.push(shapeCollision);
-									this.resolveShape(shapeCollision);
-
-									if(callback) {
-										callback.apply(null,
-											Array.prototype.slice.call(arguments, 4)
-												.concat(shapeCollision));
-									}
-								}
-							}
-						}
-
-						if(colliders.lumens) {
-							var envCollision = Collision.Lumens
-									.checkRect(colliders.lumens, treeItem);
-
-							if(envCollision) {
-								envCollision.dt = dt;
-								envCollision.doSwap().self = shape;
-								collisions.push(envCollision);
-								this.resolveLumens(envCollision);
-
-								if(callback) {
-									callback.apply(null,
-										Array.prototype.slice.call(arguments, 4)
-											.concat(envCollision));
-								}
-							}
-						}
-
-						if(colliders.walls) {
-							var walls = colliders.walls.get(treeItem);
-
-							for(var w = 0; w < walls.length; ++w) {
-								var wallCollision = this.checkWall(shape,
-										walls[w].item);
-
-								if(wallCollision) {
-									wallCollision.dt = dt;
-									collisions.push(wallCollision);
-									this.resolveWall(wallCollision);
-
-									if(callback) {
-										callback.apply(null,
-											Array.prototype.slice.call(arguments, 4)
-												.concat(wallCollision));
-									}
-								}
-							}
-						}
-
-						return collisions;
-					},
-					checkShape: function(shape, other) {
-						var collision = null;
-
-						if(shape !== other &&
-							shape.boundRad.intersects(other.boundRad)) {
-							//  TODO: narrow collision detection
-							var normal = shape.owner.pos.sub(other.owner.pos),
-								norMag = normal.mag(),
-								penetration =
-									(shape.boundRad.rad+other.boundRad.rad)-norMag;
-
-							if(!norMag) {
-								//log("Shape Collision Warning: shapes have the same center", shape, other);
-							}
-							else if(penetration > 0) {
-								collision = new Collision(shape, other,
-										normal.doScale(1/norMag), penetration);
-							}
-						}
-
-						return collision;
-					},
-					checkWall: function(shape, other) {
-						// TODO: optimisations and fine collision detection
-						var collision = new Collision(shape, other);
-
-						if(other.boundRad.intersects(shape.boundRad)) {
-							var verts = other.three.geometry.vertices;
-							
-							for(var v = 0; v < verts.length; ++v) {
-								var a = other.globPos(verts.wrap(v-1).position),
-									b = other.globPos(verts[v].position),
-									c = Collision.Circle.checkLine(shape.boundRad,
-											a, b);
-
-								if(c) {
-									// TODO: fine collision detection here
-									var vec = collision.vector.add(c.vector);
-
-									collision.penetration = vec.mag();
-									collision.normal =
-										vec.doScale(1/collision.penetration);
-								}
-							}
-						}
-
-						return ((collision.penetration > 0)? collision : null);
-					},
-					resolveLumens: function(collision) {
-						collision.self.updateBounds();
-
-						return this;
-					},
-					resolveShape: function(collision) {
-						collision.self.updateBounds();
-						collision.other.updateBounds();
-
-						return this;
-					},
-					resolveWall: function(collision) {
-						collision.self.updateBounds();
-
-						return this;
+					if(penSq > 0) {
+						collision = new Collision(circle, [a, b],
+							line.doPerp(), Math.sqrt(penSq));
 					}
+
+					return collision;
+				}
+			},
+			Shape: {
+				// colliders: { QuadTree shapes, Lumens lumens, QuadTree walls }
+				check: function(shape, colliders, dt, callback, args) {
+					var collisions = [], treeItem = shape.treeItem;
+
+					// TODO: fine collision detection
+					if(colliders.shapes) {
+						for(var nearby = colliders.shapes.get(treeItem),
+							n = 0; n < nearby.length; ++n) {
+							var shapeCollision = this.checkShape(shape,
+									nearby[n].item);
+
+							if(shapeCollision) {
+								shapeCollision.dt = dt;
+								collisions.push(shapeCollision);
+								this.resolveShape(shapeCollision);
+
+								if(callback) {
+									callback.apply(null,
+										Array.prototype.slice.call(arguments, 4)
+											.concat(shapeCollision));
+								}
+							}
+						}
+					}
+
+					if(colliders.lumens) {
+						var envCollision = Collision.Lumens
+								.checkRect(colliders.lumens, treeItem);
+
+						if(envCollision) {
+							envCollision.dt = dt;
+							envCollision.doSwap().self = shape;
+							collisions.push(envCollision);
+							this.resolveLumens(envCollision);
+
+							if(callback) {
+								callback.apply(null,
+									Array.prototype.slice.call(arguments, 4)
+										.concat(envCollision));
+							}
+						}
+					}
+
+					if(colliders.walls) {
+						var walls = colliders.walls.get(treeItem);
+
+						for(var w = 0; w < walls.length; ++w) {
+							var wallCollision = this.checkWall(shape,
+									walls[w].item);
+
+							if(wallCollision) {
+								wallCollision.dt = dt;
+								collisions.push(wallCollision);
+								this.resolveWall(wallCollision);
+
+								if(callback) {
+									callback.apply(null,
+										Array.prototype.slice.call(arguments, 4)
+											.concat(wallCollision));
+								}
+							}
+						}
+					}
+
+					return collisions;
 				},
-				Entity: {
-					// colliders: { QuadTree swarm, Firefly player, Lumens lumens, QuadTree walls }
-					check: function(entity, colliders, dt, callback, args) {
-						var collisions = [], treeItem = entity.treeItem;
+				checkShape: function(shape, other) {
+					var collision = null;
 
-						// TODO: fine collision detection (shape)
-						if(colliders.swarm) {
-							for(var nearby = colliders.swarm.get(treeItem),
-								n = 0; n < nearby.length; ++n) {
-								var entityCollision = this.checkEntity(entity,
-										nearby[n].item);
-								
-								if(entityCollision) {
-									entityCollision.dt = dt;
-									collisions.push(entityCollision);
-									this.resolveEntity(entityCollision);
+					if(shape !== other &&
+						shape.boundRad.intersects(other.boundRad)) {
+						//  TODO: narrow collision detection
+						var normal = shape.owner.pos.sub(other.owner.pos),
+							norMag = normal.mag(),
+							penetration =
+								(shape.boundRad.rad+other.boundRad.rad)-norMag;
 
-									if(callback) {
-										callback.apply(null,
-											Array.prototype.slice.call(arguments, 4)
-												.concat(entityCollision));
-									}
-								}
+						if(!norMag) {
+							//log("Shape Collision Warning: shapes have the same center", shape, other);
+						}
+						else if(penetration > 0) {
+							collision = new Collision(shape, other,
+									normal.doScale(1/norMag), penetration);
+						}
+					}
+
+					return collision;
+				},
+				checkWall: function(shape, other) {
+					// TODO: optimisations and fine collision detection
+					var collision = new Collision(shape, other);
+
+					if(other.boundRad.intersects(shape.boundRad)) {
+						var verts = other.three.geometry.vertices;
+						
+						for(var v = 0; v < verts.length; ++v) {
+							var a = other.globPos(verts.wrap(v-1).position),
+								b = other.globPos(verts[v].position),
+								c = Collision.Circle.checkLine(shape.boundRad,
+										a, b);
+
+							if(c) {
+								// TODO: fine collision detection here
+								var vec = collision.vector.add(c.vector);
+
+								collision.penetration = vec.mag();
+								collision.normal =
+									vec.doScale(1/collision.penetration);
 							}
 						}
+					}
 
-						if(colliders.player) {
-							var playerCollision = this.checkEntity(entity,
-									colliders.player);
+					return ((collision.penetration > 0)? collision : null);
+				},
+				resolveLumens: function(collision) {
+					collision.self.updateBounds();
+
+					return this;
+				},
+				resolveShape: function(collision) {
+					collision.self.updateBounds();
+					collision.other.updateBounds();
+
+					return this;
+				},
+				resolveWall: function(collision) {
+					collision.self.updateBounds();
+
+					return this;
+				}
+			},
+			Entity: {
+				// colliders: { QuadTree swarm, Firefly player, Lumens lumens, QuadTree walls }
+				check: function(entity, colliders, dt, callback, args) {
+					var collisions = [], treeItem = entity.treeItem;
+
+					// TODO: fine collision detection (shape)
+					if(colliders.swarm) {
+						for(var nearby = colliders.swarm.get(treeItem),
+							n = 0; n < nearby.length; ++n) {
+							var entityCollision = this.checkEntity(entity,
+									nearby[n].item);
 							
-							if(playerCollision) {
-								playerCollision.dt = dt;
-								collisions.push(playerCollision);
-								this.resolveEntity(playerCollision);
+							if(entityCollision) {
+								entityCollision.dt = dt;
+								collisions.push(entityCollision);
+								this.resolveEntity(entityCollision);
 
 								if(callback) {
 									callback.apply(null,
 										Array.prototype.slice.call(arguments, 4)
-											.concat(playerCollision));
+											.concat(entityCollision));
 								}
 							}
 						}
+					}
 
-						if(colliders.lumens) {
-							var envCollision = Collision.Lumens
-									.checkRect(colliders.lumens, treeItem);
+					if(colliders.player) {
+						var playerCollision = this.checkEntity(entity,
+								colliders.player);
+						
+						if(playerCollision) {
+							playerCollision.dt = dt;
+							collisions.push(playerCollision);
+							this.resolveEntity(playerCollision);
 
-							if(envCollision) {
-								envCollision.dt = dt;
-								envCollision.doSwap().self = entity;
-								collisions.push(envCollision);
-								this.resolveLumens(envCollision);
+							if(callback) {
+								callback.apply(null,
+									Array.prototype.slice.call(arguments, 4)
+										.concat(playerCollision));
+							}
+						}
+					}
+
+					if(colliders.lumens) {
+						var envCollision = Collision.Lumens
+								.checkRect(colliders.lumens, treeItem);
+
+						if(envCollision) {
+							envCollision.dt = dt;
+							envCollision.doSwap().self = entity;
+							collisions.push(envCollision);
+							this.resolveLumens(envCollision);
+
+							if(callback) {
+								callback.apply(null,
+									Array.prototype.slice.call(arguments, 4)
+										.concat(envCollision));
+							}
+						}
+					}
+
+					if(colliders.walls) {
+						for(var walls = colliders.walls.get(treeItem), w = 0;
+							w < walls.length; ++w) {
+							var wallCollision = this.checkWall(entity,
+									walls[w].item);
+
+							if(wallCollision) {
+								wallCollision.dt = dt;
+								collisions.push(wallCollision);
+								this.resolveWall(wallCollision);
 
 								if(callback) {
 									callback.apply(null,
 										Array.prototype.slice.call(arguments, 4)
-											.concat(envCollision));
+											.concat(wallCollision));
 								}
 							}
 						}
+					}
 
-						if(colliders.walls) {
-							for(var walls = colliders.walls.get(treeItem), w = 0;
-								w < walls.length; ++w) {
-								var wallCollision = this.checkWall(entity,
-										walls[w].item);
+					return collisions;
+				},
+				checkEntity: function(entity, other) {
+					var collision = Collision.Shape.checkShape(entity.shape,
+							other.shape);
 
-								if(wallCollision) {
-									wallCollision.dt = dt;
-									collisions.push(wallCollision);
-									this.resolveWall(wallCollision);
+					if(collision) {
+						collision.self = entity;
+						collision.other = other;
+					}
 
-									if(callback) {
-										callback.apply(null,
-											Array.prototype.slice.call(arguments, 4)
-												.concat(wallCollision));
-									}
-								}
-							}
-						}
+					return collision;
+				},
+				checkWall: function(entity, other) {
+					var collision = Collision.Shape.checkWall(entity.shape,
+							other);
 
-						return collisions;
-					},
-					checkEntity: function(entity, other) {
-						var collision = Collision.Shape.checkShape(entity.shape,
-								other.shape);
+					if(collision) { collision.self = entity; }
 
-						if(collision) {
-							collision.self = entity;
-							collision.other = other;
-						}
+					return collision;
+				},
+				resolveLumens: function(collision) {
+					var self = collision.self;
 
-						return collision;
-					},
-					checkWall: function(entity, other) {
-						var collision = Collision.Shape.checkWall(entity.shape,
-								other);
+					if(collision.other.toroid) {
+						var s = collision.other.boundRect.size;
 
-						if(collision) { collision.self = entity; }
-
-						return collision;
-					},
-					resolveLumens: function(collision) {
-						var self = collision.self;
-
-						if(collision.other.toroid) {
-							var s = collision.other.boundRect.size;
-
-							if(self.pos.x < 0) { self.pos.x = self.pos.x%s.x+s.x; }
-							else if(self.pos.x > s.x) { self.pos.x = self.pos.x%s.x-s.x; }
-							
-							if(self.pos.y < 0) { self.pos.y = self.pos.y%s.y+s.y; }
-							else if(self.pos.y > s.y) { self.pos.y = self.pos.y%s.y-s.y; }
-						}
-						else {
-							self.vel.doAdd(Impulse.collision({
-								dt: collision.dt, normal: collision.normal,
-								restitution: self.restitution, point1: self
-							}));
-							self.pos.doAdd(Move.penetration({
-								normal: collision.normal,
-								penetration: collision.penetration, point1: self
-							}));
-						}
-
-						var shapeCollision = $.extend({}, collision,
-							{ self: self.shape });
-
-						Collision.Shape.resolveLumens(shapeCollision);
-
-						return this;
-					},
-					resolveEntity: function(collision) {
-						var self = collision.self, other = collision.other,
-							impulses = Impulse.collision({
-								dt: collision.dt, normal: collision.normal,
-								restitution: self.restitution,
-								point1: self, point2: other
-							}),
-							moves = Move.penetration({
-								normal: collision.normal,
-								penetration: collision.penetration,
-								point1: self, point2: other
-							});
-
-						self.vel.doAdd(impulses[0]);
-						self.pos.doAdd(moves[0]);
-
-						other.vel.doAdd(impulses[1]);
-						other.pos.doAdd(moves[1]);
-
-						var shapeCollision = $.extend({}, collision,
-							{ self: self.shape, other: other.shape });
-
-						Collision.Shape.resolveShape(shapeCollision);
-
-						self.updateTreeItem();
-						other.updateTreeItem();
-
-						return this;
-					},
-					resolveWall: function(collision) {
-						var self = collision.self;
-
+						if(self.pos.x < 0) { self.pos.x = self.pos.x%s.x+s.x; }
+						else if(self.pos.x > s.x) { self.pos.x = self.pos.x%s.x-s.x; }
+						
+						if(self.pos.y < 0) { self.pos.y = self.pos.y%s.y+s.y; }
+						else if(self.pos.y > s.y) { self.pos.y = self.pos.y%s.y-s.y; }
+					}
+					else {
 						self.vel.doAdd(Impulse.collision({
 							dt: collision.dt, normal: collision.normal,
 							restitution: self.restitution, point1: self
@@ -1221,419 +1199,775 @@
 							normal: collision.normal,
 							penetration: collision.penetration, point1: self
 						}));
-
-						var shapeCollision = $.extend({}, collision,
-							{ self: self.shape });
-
-						Collision.Shape.resolveWall(shapeCollision);
-
-						return this;
 					}
+
+					var shapeCollision = $.extend({}, collision,
+						{ self: self.shape });
+
+					Collision.Shape.resolveLumens(shapeCollision);
+
+					return this;
 				},
-				Viewport: {
-					checkLumens: function(viewport, lumens, dt, callback, args) {
-						var collision = Collision.Lumens.checkRect(lumens,
-								viewport.boundRect);
-
-						if(collision) {
-							collision.dt = dt;
-							collision.doSwap().self = viewport;
-							this.resolveLumens(collision);
-
-							if(callback) {
-								callback.apply(null,
-									Array.prototype.slice.call(arguments, 3)
-										.concat(collision));
-							}
-						}
-
-						return collision;
-					},
-					resolveLumens: function(collision) {
-						collision.self.pos.doAdd(Move.penetration({
+				resolveEntity: function(collision) {
+					var self = collision.self, other = collision.other,
+						impulses = Impulse.collision({
+							dt: collision.dt, normal: collision.normal,
+							restitution: self.restitution,
+							point1: self, point2: other
+						}),
+						moves = Move.penetration({
 							normal: collision.normal,
 							penetration: collision.penetration,
-							point1: collision.self
-						}));
-						collision.self.reposition();
+							point1: self, point2: other
+						});
 
-						return this;
-					}
+					self.vel.doAdd(impulses[0]);
+					self.pos.doAdd(moves[0]);
+
+					other.vel.doAdd(impulses[1]);
+					other.pos.doAdd(moves[1]);
+
+					var shapeCollision = $.extend({}, collision,
+						{ self: self.shape, other: other.shape });
+
+					Collision.Shape.resolveShape(shapeCollision);
+
+					self.updateTreeItem();
+					other.updateTreeItem();
+
+					return this;
 				},
-				Lumens: {
-					checkRect: function(lumens, other) {
-						var collision = null;
+				resolveWall: function(collision) {
+					var self = collision.self;
 
-						if(!lumens.boundRect.contains(other)) {
-							var s = lumens.boundRect.size,
+					self.vel.doAdd(Impulse.collision({
+						dt: collision.dt, normal: collision.normal,
+						restitution: self.restitution, point1: self
+					}));
+					self.pos.doAdd(Move.penetration({
+						normal: collision.normal,
+						penetration: collision.penetration, point1: self
+					}));
 
-								/* In the case that the rect is larger than lumens
-									boundRect, it should be centered */
-								margin = new Vec2D(Math.max((other.size.x-s.x)/2, 0),
-									Math.max((other.size.y-s.y)/2, 0)),
-								
-								normal = new Vec2D(Math.min(other.pos.x, -margin.x)+
-										Math.max((other.pos.x+other.size.x)-s.x, margin.x),
-									Math.min(other.pos.y, -margin.y)+
-										Math.max((other.pos.y+other.size.y)-s.y, margin.y)),
+					var shapeCollision = $.extend({}, collision,
+						{ self: self.shape });
 
-								penetration = normal.mag();
+					Collision.Shape.resolveWall(shapeCollision);
 
-							if(penetration) {
-								collision = new Collision(lumens, other,
-									normal.doScale(1/penetration), penetration);
-							}
+					return this;
+				}
+			},
+			Viewport: {
+				checkLumens: function(viewport, lumens, dt, callback, args) {
+					var collision = Collision.Lumens.checkRect(lumens,
+							viewport.boundRect);
+
+					if(collision) {
+						collision.dt = dt;
+						collision.doSwap().self = viewport;
+						this.resolveLumens(collision);
+
+						if(callback) {
+							callback.apply(null,
+								Array.prototype.slice.call(arguments, 3)
+									.concat(collision));
 						}
+					}
 
-						return collision;
+					return collision;
+				},
+				resolveLumens: function(collision) {
+					collision.self.pos.doAdd(Move.penetration({
+						normal: collision.normal,
+						penetration: collision.penetration,
+						point1: collision.self
+					}));
+					collision.self.reposition();
+
+					return this;
+				}
+			},
+			Lumens: {
+				checkRect: function(lumens, other) {
+					var collision = null;
+
+					if(!lumens.boundRect.contains(other)) {
+						var s = lumens.boundRect.size,
+
+							/* In the case that the rect is larger than lumens
+								boundRect, it should be centered */
+							margin = new Vec2D(Math.max((other.size.x-s.x)/2, 0),
+								Math.max((other.size.y-s.y)/2, 0)),
+							
+							normal = new Vec2D(Math.min(other.pos.x, -margin.x)+
+									Math.max((other.pos.x+other.size.x)-s.x, margin.x),
+								Math.min(other.pos.y, -margin.y)+
+									Math.max((other.pos.y+other.size.y)-s.y, margin.y)),
+
+							penetration = normal.mag();
+
+						if(penetration) {
+							collision = new Collision(lumens, other,
+								normal.doScale(1/penetration), penetration);
+						}
+					}
+
+					return collision;
+				}
+			}
+		});
+//	}
+
+//	INFLUENCES {
+		var Force = {
+			/* See Game Physics Engine Development, by Ian Millington */
+			// { Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target) }
+			spring: function(options) {
+				var force = options.posTo.sub(options.posFrom),
+					length = force.mag();
+				
+				return ((length)? force.doScale(options.factor*
+						Math.abs(length-options.restLength)/length)
+					:	force);
+			},
+			// { Particle pointFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target), Number damping }
+			dampedSpring: function(options) {
+				var from = options.pointFrom.pos, oldFrom = options.posFrom;
+
+				options.posFrom = from;
+
+				var spring = this.spring(options), damp;
+
+				if(from.equals(options.posTo)) {
+					damp = options.pointFrom.vel.scale(-options.damping);
+				}
+				else {
+					damp = from.sub(options.posTo).doUnit();
+					damp.doScale(-options.damping*Math.max(0,
+						options.pointFrom.vel.dot(damp)));
+				}
+
+				delete options.posFrom;
+				options.posFrom = oldFrom;
+
+				return damp.doAdd(spring);
+			},
+			// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
+			// { Number range, Vec2D vel }
+			wander: function(options) {
+				/* range is proportional to the distance either side of the current
+					heading within which the entity may wander (radius of wander circle)
+					vel is the minimum velocity vector which wandering may produce
+					(distance wander circle is ahead of the entity) */
+				var angle = Math.random()*2*Math.PI;
+				return options.vel.add(new Vec2D(options.range*Math.cos(angle),
+					options.range*Math.sin(angle)));
+			},
+			/* Adapted from Craig Reynolds' famous Boids - http://www.red3d.com/cwr/boids/
+				and Harry Brundage's implementation, among others - http://harry.me/2011/02/17/neat-algorithms---flocking */
+			// { QuadTree swarm, Particle member, Number nearbyRad, { Number separation, Number alignment, Number cohesion } weight, Number predict (o) }
+			swarm: function(options) {
+				var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
+					totalAlignment = new Vec2D(), swarm = new Vec2D(),
+					
+					predict = (options.predict || 0),
+					focus = options.member.vel.scale(predict)
+						.doAdd(options.member.pos),
+					nearby = options.swarm.get((new Circle(focus,
+							options.nearbyRad)).containingAARect()),
+					
+					num = 0;
+				
+				for(var n = 0; n < nearby.length; ++n) {
+					var near = nearby[n].item;
+					
+					if(options.member !== near) {
+						var nearbyFocus = near.vel.scale(predict)
+								.doAdd(near.pos),
+							vec = focus.sub(nearbyFocus),
+							dist = vec.mag();
+
+						if(dist < options.nearbyRad) {
+							++num;
+
+							var distFactor = options.nearbyRad/dist;
+							totalSeparation.doAdd(vec.doUnit()
+								.doScale(distFactor*distFactor));
+							
+							totalCohesion.doAdd(nearbyFocus).doSub(focus);
+							
+							var alignment = (near.angle ||
+								((near.vel.magSq())?
+									near.vel.unit() : null));
+							
+							if(alignment) { totalAlignment.doAdd(alignment); }
+						}
 					}
 				}
-			});
-	//	}
+				
+				if(num) {
+					swarm.doAdd(totalSeparation.doScale(options.weight.separation))
+						.doAdd(totalCohesion.doScale(options.weight.cohesion))
+						.doAdd(totalAlignment.doScale(options.weight.alignment))
+						.doScale(1/num);
+				}
+				
+				return swarm;
+			},
+			// { Particle point, QuadTree walls, Lumens lumens, Number radius, Number predict }
+			avoidWalls: function(options) {
+				var force = new Vec2D(),
+					predict = (options.predict || 0),
+					focus = new Circle(options.point.vel.scale(predict)
+							.doAdd(options.point.pos), options.radius),
+					nearby = options.walls.get(focus.containingAARect());
 
-	//	INFLUENCES {
-			var Force = {
-				/* See Game Physics Engine Development, by Ian Millington */
-				// { Vec2D posFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target) }
-				spring: function(options) {
-					var force = options.posTo.sub(options.posFrom),
-						length = force.mag();
-					
-					return ((length)? force.doScale(options.factor*
-							Math.abs(length-options.restLength)/length)
-						:	force);
-				},
-				// { Particle pointFrom, Vec2D posTo, Number factor (springiness), Number restLength (spring target), Number damping }
-				dampedSpring: function(options) {
-					var from = options.pointFrom.pos, oldFrom = options.posFrom;
+				for(var w = 0; w < nearby.length; ++w) {
+					var wall = nearby[w].item;
 
-					options.posFrom = from;
-
-					var spring = this.spring(options), damp;
-
-					if(from.equals(options.posTo)) {
-						damp = options.pointFrom.vel.scale(-options.damping);
-					}
-					else {
-						damp = from.sub(options.posTo).doUnit();
-						damp.doScale(-options.damping*Math.max(0,
-							options.pointFrom.vel.dot(damp)));
-					}
-
-					delete options.posFrom;
-					options.posFrom = oldFrom;
-
-					return damp.doAdd(spring);
-				},
-				// Circle-led wander idea from Mat Buckland's Programming Game AI by Example
-				// { Number range, Vec2D vel }
-				wander: function(options) {
-					/* range is proportional to the distance either side of the current
-						heading within which the entity may wander (radius of wander circle)
-						vel is the minimum velocity vector which wandering may produce
-						(distance wander circle is ahead of the entity) */
-					var angle = Math.random()*2*Math.PI;
-					return options.vel.add(new Vec2D(options.range*Math.cos(angle),
-						options.range*Math.sin(angle)));
-				},
-				/* Adapted from Craig Reynolds' famous Boids - http://www.red3d.com/cwr/boids/
-					and Harry Brundage's implementation, among others - http://harry.me/2011/02/17/neat-algorithms---flocking */
-				// { QuadTree swarm, Particle member, Number nearbyRad, { Number separation, Number alignment, Number cohesion } weight, Number predict (o) }
-				swarm: function(options) {
-					var totalSeparation = new Vec2D(), totalCohesion = new Vec2D(),
-						totalAlignment = new Vec2D(), swarm = new Vec2D(),
+					if(wall.boundRad.intersects(focus)) {
+						var verts = wall.three.geometry.vertices;
 						
-						predict = (options.predict || 0),
-						focus = options.member.vel.scale(predict)
-							.doAdd(options.member.pos),
-						nearby = options.swarm.get((new Circle(focus,
-								options.nearbyRad)).containingAARect()),
-						
-						num = 0;
-					
-					for(var n = 0; n < nearby.length; ++n) {
-						var near = nearby[n].item;
-						
-						if(options.member !== near) {
-							var nearbyFocus = near.vel.scale(predict)
-									.doAdd(near.pos),
-								vec = focus.sub(nearbyFocus),
-								dist = vec.mag();
+						for(var v = 0; v < verts.length; ++v) {
+							var a = wall.globPos(verts.wrap(v-1).position),
+								b = wall.globPos(verts[v].position),
+								c = Collision.Circle.checkLine(focus,
+										a, b);
 
-							if(dist < options.nearbyRad) {
-								++num;
-
-								var distFactor = options.nearbyRad/dist;
-								totalSeparation.doAdd(vec.doUnit()
-									.doScale(distFactor*distFactor));
-								
-								totalCohesion.doAdd(nearbyFocus).doSub(focus);
-								
-								var alignment = (near.angle ||
-									((near.vel.magSq())?
-										near.vel.unit() : null));
-								
-								if(alignment) { totalAlignment.doAdd(alignment); }
+							if(c) {
+								// Inverse square force
+								force.doAdd(c.vector.scale(c.penetration));
 							}
 						}
-					}
-					
-					if(num) {
-						swarm.doAdd(totalSeparation.doScale(options.weight.separation))
-							.doAdd(totalCohesion.doScale(options.weight.cohesion))
-							.doAdd(totalAlignment.doScale(options.weight.alignment))
-							.doScale(1/num);
-					}
-					
-					return swarm;
-				},
-				// { Particle point, QuadTree walls, Lumens lumens, Number radius, Number predict }
-				avoidWalls: function(options) {
-					var force = new Vec2D(),
-						predict = (options.predict || 0),
-						focus = new Circle(options.point.vel.scale(predict)
-								.doAdd(options.point.pos), options.radius),
-						nearby = options.walls.get(focus.containingAARect());
-
-					for(var w = 0; w < nearby.length; ++w) {
-						var wall = nearby[w].item;
-
-						if(wall.boundRad.intersects(focus)) {
-							var verts = wall.three.geometry.vertices;
-							
-							for(var v = 0; v < verts.length; ++v) {
-								var a = wall.globPos(verts.wrap(v-1).position),
-									b = wall.globPos(verts[v].position),
-									c = Collision.Circle.checkLine(focus,
-											a, b);
-
-								if(c) {
-									// Inverse square force
-									force.doAdd(c.vector.scale(c.penetration));
-								}
-							}
-						}
-					}
-
-					if(options.lumens) {
-						var lc = Collision.Lumens.checkRect(options.lumens,
-										focus.containingAARect());
-
-						if(lc) {
-							lc.doSwap();
-
-							// Inverse square force
-							force.doAdd(lc.vector.scale(lc.penetration));
-						}
-					}
-
-					return force;
-				},
-				/* Adapted from "How To Implement a Pressure Soft Body
-					Model", by Maciej Matyka, using Gauss' theorem to obtain volume,
-					and pressure from there - maq@panoramix.ift.uni.wroc.pl */
-				/* A bit different to the others, in that it doesn't return a force to
-					be applied to each point in turn, but rather applies it across
-					all of the points in turn */
-				applyPressure: function(points, factor) {
-					// Derived used to prevent repeated calculations
-					var volume = 0, derived = [];
-
-					// TODO: change to use THREE.geometry's existing normals
-					for(var p = 0; p < points.length; ++p) {
-						var from = points.wrap(p-1), to = points[p],
-							vec = to.pos.sub(from.pos),
-							mag = vec.mag();
-
-						if(mag) {
-							var normal = vec.perp().doScale(1/mag);
-							
-							volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
-							derived.push({ from: from, to: to, mag: mag, normal: normal});
-						}
-					}
-
-					var invVolume = 1/volume;
-					for(var d = 0; d < derived.length; ++d) {
-						var data = derived[d],
-							pressure = invVolume*factor*data.mag;
-						
-						data.from.force.doAdd(data.normal.scale(pressure));
-						data.to.force.doAdd(data.normal.scale(pressure));
 					}
 				}
-			};
 
+				if(options.lumens) {
+					var lc = Collision.Lumens.checkRect(options.lumens,
+									focus.containingAARect());
 
-			Impulse = {
-				/* See Game Physics Engine Development, by Ian Millington */
-				/* { Number dt, Vec2D normal, Number restitution, Particle point1, Particle point2 o } */
-				collision: function(options) {
-					var impulse = new Vec2D();
+					if(lc) {
+						lc.doSwap();
 
-					if(options.restitution) {
-						var relVel = options.point1.vel.copy();
-
-						if(options.point2) { relVel.doSub(options.point2.vel); }
-
-						var sepVel = relVel.dot(options.normal);
-
-						if(sepVel <= 0) {
-							var closeVel = -sepVel*options.restitution,
-								relAcc = options.point1.acc.copy();
-
-							if(options.point2) { relAcc.doSub(options.point2.acc); }
-
-							var accSepVel = relAcc.dot(options.normal)*options.dt;
-
-							if(accSepVel < 0) {
-								closeVel = Math.max(closeVel+accSepVel*
-									options.restitution, 0);
-							}
-
-							var deltaVel = closeVel-sepVel,
-								totalInvMass = options.point1.invMass;
-
-							if(options.point2) {
-								totalInvMass += options.point2.invMass;
-							}
-
-							if(totalInvMass > 0) {
-								impulse = options.normal.scale(deltaVel/totalInvMass);
-
-								var point1Impulse =
-									impulse.scale(options.point1.invMass);
-
-								return ((options.point2)?
-										[point1Impulse,
-											impulse.scale(-options.point2.invMass)]
-									:	point1Impulse);
-							}
-						}
+						// Inverse square force
+						force.doAdd(lc.vector.scale(lc.penetration));
 					}
+				}
 
-					return ((options.point2)? [impulse, impulse] : impulse);
-				}/*,
-				friction: function(options) {*/
-					/* Friction acts against the component of the
-						velocity 'v' parallel to the surface.
-						The component parallel to the surface's normal 'n' is (n.v)n
-						The component parallel to the surface is perpendicular to
-						this, v-(n.v)n
-						So we have friction = -f(v-(n.v)n),
-						where f is a coefficient of friction*/
-				//}
-			};
+				return force;
+			},
+			/* Adapted from "How To Implement a Pressure Soft Body
+				Model", by Maciej Matyka, using Gauss' theorem to obtain volume,
+				and pressure from there - maq@panoramix.ift.uni.wroc.pl */
+			/* A bit different to the others, in that it doesn't return a force to
+				be applied to each point in turn, but rather applies it across
+				all of the points in turn */
+			applyPressure: function(points, factor) {
+				// Derived used to prevent repeated calculations
+				var volume = 0, derived = [];
+
+				// TODO: change to use THREE.geometry's existing normals
+				for(var p = 0; p < points.length; ++p) {
+					var from = points.wrap(p-1), to = points[p],
+						vec = to.pos.sub(from.pos),
+						mag = vec.mag();
+
+					if(mag) {
+						var normal = vec.perp().doScale(1/mag);
+						
+						volume += 0.5*Math.abs(vec.x)*mag*Math.abs(normal.x);
+						derived.push({ from: from, to: to, mag: mag, normal: normal});
+					}
+				}
+
+				var invVolume = 1/volume;
+				for(var d = 0; d < derived.length; ++d) {
+					var data = derived[d],
+						pressure = invVolume*factor*data.mag;
+					
+					data.from.force.doAdd(data.normal.scale(pressure));
+					data.to.force.doAdd(data.normal.scale(pressure));
+				}
+			}
+		};
 
 
-			Move = {
-				/* { Vec2D normal, Number penetration, Particle point1, Particle point2 o } */
-				penetration: function(options) {
-					var move = new Vec2D();
+		Impulse = {
+			/* See Game Physics Engine Development, by Ian Millington */
+			/* { Number dt, Vec2D normal, Number restitution, Particle point1, Particle point2 o } */
+			collision: function(options) {
+				var impulse = new Vec2D();
 
-					if(options.penetration > 0) {
-						var totalInvMass = options.point1.invMass;
+				if(options.restitution) {
+					var relVel = options.point1.vel.copy();
 
-						if(options.point2) { totalInvMass += options.point2.invMass; }
+					if(options.point2) { relVel.doSub(options.point2.vel); }
+
+					var sepVel = relVel.dot(options.normal);
+
+					if(sepVel <= 0) {
+						var closeVel = -sepVel*options.restitution,
+							relAcc = options.point1.acc.copy();
+
+						if(options.point2) { relAcc.doSub(options.point2.acc); }
+
+						var accSepVel = relAcc.dot(options.normal)*options.dt;
+
+						if(accSepVel < 0) {
+							closeVel = Math.max(closeVel+accSepVel*
+								options.restitution, 0);
+						}
+
+						var deltaVel = closeVel-sepVel,
+							totalInvMass = options.point1.invMass;
+
+						if(options.point2) {
+							totalInvMass += options.point2.invMass;
+						}
 
 						if(totalInvMass > 0) {
-							move = options.normal.scale(options.penetration/totalInvMass);
+							impulse = options.normal.scale(deltaVel/totalInvMass);
 
-							var point1Move = move.scale(options.point1.invMass);
+							var point1Impulse =
+								impulse.scale(options.point1.invMass);
 
 							return ((options.point2)?
-									[point1Move, move.scale(-options.point2.invMass)]
-								:	point1Move);
+									[point1Impulse,
+										impulse.scale(-options.point2.invMass)]
+								:	point1Impulse);
 						}
 					}
-
-					return ((options.point2)? [move, move] : move);
 				}
-			};
-	//	}
+
+				return ((options.point2)? [impulse, impulse] : impulse);
+			}/*,
+			friction: function(options) {*/
+				/* Friction acts against the component of the
+					velocity 'v' parallel to the surface.
+					The component parallel to the surface's normal 'n' is (n.v)n
+					The component parallel to the surface is perpendicular to
+					this, v-(n.v)n
+					So we have friction = -f(v-(n.v)n),
+					where f is a coefficient of friction*/
+			//}
+		};
 
 
-		// Wraps THREE.Spotlight... or should it subclass it??
-		function Spotlight(options) {
+		Move = {
+			/* { Vec2D normal, Number penetration, Particle point1, Particle point2 o } */
+			penetration: function(options) {
+				var move = new Vec2D();
+
+				if(options.penetration > 0) {
+					var totalInvMass = options.point1.invMass;
+
+					if(options.point2) { totalInvMass += options.point2.invMass; }
+
+					if(totalInvMass > 0) {
+						move = options.normal.scale(options.penetration/totalInvMass);
+
+						var point1Move = move.scale(options.point1.invMass);
+
+						return ((options.point2)?
+								[point1Move, move.scale(-options.point2.invMass)]
+							:	point1Move);
+					}
+				}
+
+				return ((options.point2)? [move, move] : move);
+			}
+		};
+//	}
+
+//	SHAPES {
+		// Wraps THREE.Mesh
+
+		// No orientation - just position (bound to particle)
+		function Shape(options) {
 			if(!options) { options = {}; }
 			
-			this.three = options.three;	// Spotlight
+			this.owner = (options.owner || new Particle());
 
-			this.target = (options.target || new Vec2D());
+			this.three = options.three;	//  THREE.Mesh
+
+			this.boundRad = new Circle();
+			this.treeItem = null;
+			this.resolve().updateBounds();
 		}
+		$.extend(Shape.prototype, {
+			update: function() { return this; },
+			resolve: function(dt) {
+				this.three.position.x = this.owner.pos.x;
+				this.three.position.y = this.owner.pos.y;
 
-	//	SHAPES {
-			// Wraps THREE.Mesh
+				this.updateBounds();
 
-			// No orientation - just position (bound to particle)
-			function Shape(options) {
-				if(!options) { options = {}; }
+				return this;
+			},
+			updateBounds: function() {
+				/* Potentially Smaller radius *//*
+				this.boundRad.radius(0);
+				this.boundRad.pos.doZero();
+
+				var verts = this.three.geometry.vertices, l = verts.length;
 				
-				this.owner = (options.owner || new Particle());
-
-				this.three = options.three;	//  THREE.Mesh
-
-				this.boundRad = new Circle();
-				this.treeItem = null;
-				this.resolve().updateBounds();
-			}
-			$.extend(Shape.prototype, {
-				update: function() { return this; },
-				resolve: function(dt) {
-					this.three.position.x = this.owner.pos.x;
-					this.three.position.y = this.owner.pos.y;
-
-					this.updateBounds();
-
-					return this;
-				},
-				updateBounds: function() {
-					/* Potentially Smaller radius *//*
-					this.boundRad.radius(0);
-					this.boundRad.pos.doZero();
-
-					var verts = this.three.geometry.vertices, l = verts.length;
+				if(l) {
+					for(var i = 0; i < l; ++i) {
+						this.boundRad.pos.doAdd(this.globPos(verts[i].pos));
+					}
+					this.boundRad.pos.doScale(1/l);
 					
-					if(l) {
-						for(var i = 0; i < l; ++i) {
-							this.boundRad.pos.doAdd(this.globPos(verts[i].pos));
-						}
-						this.boundRad.pos.doScale(1/l);
+					for(var j = 0; j < l; ++j) {
+						var radSq = this.boundRad.pos
+							.distSq(this.globPos(verts[j].pos));
 						
-						for(var j = 0; j < l; ++j) {
-							var radSq = this.boundRad.pos
-								.distSq(this.globPos(verts[j].pos));
-							
-							if(radSq > this.boundRad.radSq) {
-								this.boundRad.radSq = radSq;
-							}
+						if(radSq > this.boundRad.radSq) {
+							this.boundRad.radSq = radSq;
 						}
-						
-						this.boundRad.rad = Math.sqrt(this.boundRad.radSq);
+					}
+					
+					this.boundRad.rad = Math.sqrt(this.boundRad.radSq);
+				}
+
+				this.treeItem = this.boundRad.containingAARect();
+				this.treeItem.item = this;
+				*/
+				this.three.geometry.computeBoundingSphere();
+				this.three.boundRadius = this.three.geometry
+					.boundingSphere.radius;
+
+				this.boundRad.pos.x = this.three.position.x;
+				this.boundRad.pos.y = this.three.position.y;
+				this.boundRad.radius(this.three.boundRadius);
+
+				/* TODO: change to three.geometry.boundingBox? More
+					computation here, but closer fit to shape */
+				this.treeItem = this.boundRad.containingAARect();
+				this.treeItem.item = this;
+				
+				return this;
+			},
+			relPos: function(globPos) { return globPos.sub(this.owner.pos); },
+			globPos: function(relPos) { return this.owner.pos.add(relPos); },
+			relPosition: function(globPosition) {
+				return new THREE.Vector3().sub(globPosition, this.three.position);
+			},
+			globPosition: function(relPosition) {
+				return new THREE.Vector3().add(relPosition, this.three.position);
+			}
+		});
+//	}
+
+//	LIGHT {
+		/* Notes:
+			THREE composes shaders together from fragments (renderers/WebGLRenderer)
+			
+				These seem to be remade and recompiled whenever certain
+				things change - such as the number and types of lights
+
+				This speeds certain things up - for example, using
+				precompiled commands (#if, etc) instead of branching
+				statements (if, etc) improves performance on the GPU
+			
+			ShaderMaterial can be used to load in a custom shader
+			
+				Use a single virtual screen quad aligned to the camera
+				(later, first just have each raytraced object use the shader)
+			
+				Can the existing work done in THREE be used (phong)?
+			
+			Spotlight should therefore be fairly small class, and
+			Pointlight not needed
+			
+				Only needs to contain enough information to work well with
+				THREE, and proper clipping stuff for its cone (don't think
+				this is included in THREE)
+				Pointlight already exists, and does everything we need it to
+			
+			Since the ray-object intersections are calculated in the vertex
+			shader, the objects must be passed into the shader,
+			via a data texture - since UBOs aren't in WebGL
+
+			This link is particularly useful, with equations for
+			reflection, refraction: http://www.cs.unc.edu/~rademach/xroads-RT/RTarticle.html
+
+			So, define a simple-ish Spotlight class, and a hard RayTracer
+			class (if the shader needs to be updated and recompiled, or
+			unique for each object)
+				
+				RayTracer will hold a shader which simulates the
+				eye, primary, shadow, reflective, and refractive rays
+				
+				It checks for and processes any intersections and clipping
+				on the way back to each light source
+
+			The scene can be passed as an array of vertices and another
+			of triangles referencing it, which the shader can test collisions
+			against
+
+				Bounding Radii, Object IDs and the bottom layer of the
+				QuadTree (an uneven grid) could also be passed via
+				textures as higher levels of abstraction again, further
+				simplifying intersection tests (Quad -> BRad -> Tris)
+
+				This will make intersection code simpler by only needing
+				to check against triangles (export as triangle mesh,
+				or call THREE.GeometryUtils.triangulateQuads) - see http://www.blackpawn.com/texts/pointinpoly/default.html
+				for an excellent explanation of the barycentric coordinate
+				test
+
+				Retrieving information from a texture map for colour
+				is also neccessary (sampler2D)
+
+				Walls must always intersect rays - either the walls must
+				always be geometries which are higher than the light
+				source (check THREE.ExtrudeGeometry for a possible way to
+				extrude from a line at runtime - https://github.com/mrdoob/three.js/blob/master/src/extras/geometries/ExtrudeGeometry.js,
+				https://github.com/mrdoob/three.js/blob/master/src/extras/core/Path.js,
+				and https://github.com/mrdoob/three.js/blob/master/src/extras/core/Shape.js),
+				or some code to handle this specific case (infinite height
+				objects) must be written into the shader
+
+				Evans' fragment shader skeleton code:
+
+					vec3 ray = initialRay;
+					vec3 origin = intitialOrigin;
+
+					vec3 colorMask = vec3(1.0);
+					vec3 accumulatedColor = vec3(0.0);
+
+					for(int bounce = 0; bounce < 5; bounce++) {
+						float t = [compute t from objects];
+						vec3 hit = origin+ray*t;
+
+						vec3 materialColor = [compute material color from hit];
+						float directLighting = [compute direct lighting from hit];
+
+						// accumulate incoming light
+						colorMask *= materialColor;
+						accumulatedColor += colorMask*directLighting;
+
+						ray = [compute next ray];
+						origin = hit;
 					}
 
-					this.treeItem = this.boundRad.containingAARect();
-					this.treeItem.item = this;
-					*/
-					this.three.geometry.computeBoundingSphere();
-					this.three.boundRadius = this.three.geometry
-						.boundingSphere.radius;
+					gl_FragColor = accumulatedColor;
 
-					this.boundRad.pos.x = this.three.position.x;
-					this.boundRad.pos.y = this.three.position.y;
-					this.boundRad.radius(this.three.boundRadius);
+			THREE objects are very simple, and THREE.WebGLRenderer bears alot
+			of the weight of setting them up as renderable objects - this
+			setup cannot be done without calling render, and we don't
+			want to render the scene graph itself (just use it as a source
+			for the screen shader)
 
-					/* TODO: change to three.geometry.boundingBox? More
-						computation here, but closer fit to shape */
-					this.treeItem = this.boundRad.containingAARect();
-					this.treeItem.item = this;
-					
-					return this;
-				},
-				relPos: function(globPos) { return globPos.sub(this.owner.pos); },
-				globPos: function(relPos) { return this.owner.pos.add(relPos); }
-			});
-	//	}
+				The neccessary parts are vertex/matrix setup - which
+				pass the transformation matrices to the vertex shaders -
+				maybe the scene graph stuff; and exclude the actual
+				rendering, shadowmap, etc
+
+				Since the ray tracing shader needs this data for each
+				object in the scene, it must also be passed along
+				with the vertices, bounding radii, textures, object IDs,
+				and resolved Quad Tree as global data in a heirarchy
+
+					QuadTree
+						ObjectIDs
+
+				Copy THREE.WebGLRenderer into a WebGLRayTracer and remove
+				all but these neccessary parts of code, set it up with a
+				single screen and shader, and pipe all the data it needs
+				in from the rest of the code (instead of rendering, as it
+				currently is, it will populate the ray tracing shader
+				textures properly with its data) */
+
+		function Spotlight(options) {
+			if(!options) { options = {}; }
+
+			THREE.PointLight.call(this, options.hex,
+				options.intensity, options.distance);
+
+			if(options.position) { this.position = options.position; }
+
+			this.direction = (options.direction || new THREE.Vector3());
+			this.angle = (options.angle || 0);
+
+			this.cosAngle = Math.cos(angle);
+			this.pos = new Vec2D(this.position.x, this.position.y);
+			this.dir = new Vec2D(this.direction.x, this.direction.y);
+
+			this.boundRad = new Circle();
+			this.treeItem = null;
+			this.update();
+		}
+		$.extend(inherit(Spotlight, THREE.PointLight).prototype, {
+			update: function() {
+				/* var dist = new Vec2D().copy(this.direction.clone()
+								.multiplyScalar(this.distance/2)).mag()+
+							this.sinAngle*this.distance; */
+				/* Just treat it as a point light - naive, but simpler
+					than accounting for the spot cone cutoff */
+				this.boundRad.radius(this.distance/2);
+				this.boundRad.pos.copy(this.dir.scale(this.boundRad.rad)
+					.doAdd(this.pos));
+
+				this.treeItem = this.boundRad.containingAARect();
+				this.treeItem.item = this;
+
+				return this;
+			},
+			updatePos: function() {
+				this.pos.copy(this.position);
+				this.dir.copy(this.direction);
+
+				return this;
+			},
+			updatePosition: function() {
+				this.position.x = this.pos.x;
+				this.position.y = this.pos.y;
+				this.direction.x = this.dir.x;
+				this.direction.y = this.dir.y;
+
+				return this;
+			}
+		});
+
+
+		function RayTracer(options) {
+			if(!options) { options = {}; }
+		}
+		$.extend(RayTracer.prototype, {
+			/* TODO: see THREE.WebGLShaders - https://github.com/mrdoob/three.js/blob/master/src/renderers/WebGLShaders.js#L1159
+				to set uniforms etc. correctly */
+
+			/* Supplied by THREE:
+				uniform mat4 objectMatrix;
+				uniform mat4 modelViewMatrix;
+				uniform mat4 projectionMatrix;
+				uniform mat4 viewMatrix;
+				uniform mat3 normalMatrix;
+				uniform vec3 cameraPosition;
+
+				attribute vec3 position;
+				attribute vec3 normal;
+				attribute vec2 uv;
+				attribute vec2 uv2;
+
+				as well as color, morph targets, and skinning
+				https://github.com/mrdoob/three.js/blob/master/src/renderers/WebGLRenderer.js#L5273
+
+				Set material.shading to THREE.SmoothShading to get
+				per-vertex normals:
+				https://github.com/mrdoob/three.js/blob/master/src/renderers/WebGLRenderer.js#L774 */
+			vertexHeader: '',
+			/* Supplied by THREE:
+				uniform mat4 viewMatrix;
+				uniform vec3 cameraPosition;
+
+				as well as precision
+				https://github.com/mrdoob/three.js/blob/master/src/renderers/WebGLRenderer.js#L5362
+
+				Set material.lights to true to use lights and include the
+				corresponding variables:
+				https://github.com/mrdoob/three.js/blob/master/src/renderers/WebGLShaders.js#L419,
+				https://github.com/mrdoob/three.js/blob/master/src/renderers/WebGLShaders.js#L458 */
+			fragmentHeader:
+				'#if MAX_POINT_LIGHTS > 0'+
+					'uniform vec3 pointLightColor[MAX_POINT_LIGHTS];'+
+					'uniform vec3 pointLightPosition[MAX_POINT_LIGHTS];'+
+					'uniform float pointLightDistance[MAX_POINT_LIGHTS];'+
+				'#endif'+
+
+				'#define precision 0.0001'+
+				'uniform float infinity;'+
+
+				'uniform float cellMinZ;'+
+				'uniform float cellMaxZ;',
+
+			// Maps the cell index to the meshes and mesh triangles textures
+			getCellMeshes: 'float getCellMeshes(float index) {'+
+				'return texture2D(dataLists, vec2(index, 0)).r;'+
+			'}',
+			// Queries the mesh list texture at the index
+			getMesh: 'float getMesh(float index) {'+
+				'return texture2D(dataLists, vec2(index, 0)).g;'+
+			'}',
+			// Maps the mesh triangles index to the triangles texture
+			getMeshTriangles: 'float getMeshTriangles(float index) {'+
+				'return texture2D(dataLists, vec2(index, 0)).b;'+
+			'}',
+			// Queries the triangle list texture at the index
+			getTriangle: 'float getTriangle(float index) {'+
+				'return texture2D(dataLists, vec2(index, 0)).a;'+
+			'}',
+
+			/* Fast'n'simple intersection tests
+				Only return whether an intersection occurred */
+			rayIntersectsAABox: 'bool rayIntersectsAABox(vec3 origin,'+
+				'vec3 ray, vec3 min, vec3 max) {'+
+				''+
+			'}',
+			// http://www.cs.unc.edu/~rademach/xroads-RT/RTarticle.html
+			rayIntersectsSphere: 'bool rayIntersectsSphere(vec3 origin,'+
+				'vec3 ray, vec3 center, float radius) {'+
+				'vec3 oc = center-origin;'+
+				'float v = dot(oc, v);'+
+				'float dSq = radius*radius-(dot(oc, oc)-v*v);'+
+				
+				'return (dSq >= 0);'+
+			'}',
+
+			/* Full intersection tests
+				The returned float (t) dentoes the distance along
+				the ray at which the intersection occurs, where valid values
+				for t are in the range [precision, infinity], exclusively */
+			raySphereIntersection: 'float raySphereIntersection(vec3 origin,'+
+				'vec3 ray, vec3 center, float radius) {'+
+				'vec3 oc = center-origin;'+
+				'float v = dot(oc, v);'+
+				'float dSq = radius*radius-(dot(oc, oc)-v*v);'+
+				
+				'return ((dSq >= 0)? v-sqrt(dSq) : 0.0);'+
+			'}',
+			rayPlaneIntersection: 'float rayPlaneIntersection(vec3 origin,'+
+				'vec3 ray, vec3 point, vec3 normal) {'+
+				'float dir = dot(ray, normal);'+
+
+				// Less than or equal to zero if parrallel or behind ray
+				'return ((abs(dir) >= precision)?'+
+					'dot(normal, (point-origin))/dir : 0.0);'+
+			'}',
+			rayTriangleIntersection: 'float rayTriangleIntersection(vec3 origin,'+
+				'vec3 ray, vec3 a, vec3 b, vec3 c) {'+
+				'float t = rayPlaneIntersection(origin, ray, a);'+
+
+				// Check if parrallel to or behind ray
+				'if(precision < t && t < infinity) {'+
+					'vec3 point = origin+ray*t;'+
+
+					// Barycentric coordinate test - http://www.blackpawn.com/texts/pointinpoly/default.html
+					// Compute vectors
+					'vec3 v0 = c-a;'+
+					'vec3 v1 = b-a;'+
+					'vec3 v2 = point-a;'+
+
+					// Compute dot products
+					'float dot00 = dot(v0, v0);'+
+					'float dot01 = dot(v0, v1);'+
+					'float dot02 = dot(v0, v2);'+
+					'float dot11 = dot(v1, v1);'+
+					'float dot12 = dot(v1, v2);'+
+
+					// Compute barycentric coordinates
+					'float invDenom = 1/(dot00*dot11-dot01*dot01);'+
+					'float u = (dot11*dot02-dot01*dot12)*invDenom;'+
+					'float v = (dot00*dot12-dot01*dot02)*invDenom;'+
+
+					// Check if point is in triangle
+					'if(u < 0 || v < 0 || u+v >= 1) { t = 0.0; }'+
+				'}'+
+
+				'return t;'+
+			'}'
+		});
 //	}
 	
 //	ENTITIES {
@@ -1705,6 +2039,8 @@
 			/* TODO: change to Body */
 			Entity.call(this, Particle, settings);
 
+			/* TODO: change to SoftShape (and ensure geometry.dynamic
+				is set to true before passing to mesh) */
 			this.shape = new Shape({ owner: this,
 				three: new THREE.Mesh(new THREE.SphereGeometry(15, 7, 7),
 					new THREE.MeshLambertMaterial({ color: 0xffffff,
@@ -1751,7 +2087,13 @@
 		
 
 		function Predator(options) {
+			// Ensure these are shallow copied
+			var swarm = safeGet(options, "swarm.swarm");
+			if(swarm) { delete options.swarm.swarm; }
+
 			var settings = $.extend(true, {}, Predator.settings, options);
+
+			settings.swarm.swarm = options.swarm.swarm = swarm;
 			
 			/* Particle entity template */
 			/* TODO: change to Body */
@@ -1767,11 +2109,12 @@
 			this.avoid = settings.avoid;
 			this.swarm.member = this.avoid.point = this;
 
-			this.schedule = settings.schedule;
+			for(var influences = [this.swarm, this.wander, this.avoid],
+				i = 0; i < influences.length; ++i) {
+				var influence = influences[i];
 
-			for(var s in this.schedule) {
-				var schedule = this.schedule[s];
-				if(!schedule.force) { schedule.force = new Vec2D(); }
+				influence.schedule = new Schedule().copy(influence.schedule);
+				influence.force = new Vec2D().copy(influence.force);
 			}
 			
 			this.state = Predator.states.spawn;
@@ -1779,17 +2122,6 @@
 			this.updateTreeItem();
 		}
 		$.extend(inherit(Predator, Entity.inherit(Particle)).prototype, {
-			resolve: function(dt) {
-				if(dt) {
-					for(var s in this.schedule) {
-						this.schedule[s].wait -= dt;
-					}
-
-					Entity.prototype.resolve.call(this, dt);
-				}
-				
-				return this;
-			},
 			update: function() {
 				var swarmWeight = this.swarm.weight,
 					swarmWeights = swarmWeight.separation+swarmWeight.cohesion+
@@ -1797,13 +2129,15 @@
 					wanderWeight = this.wander.weight,
 					avoidWeight = this.avoid.weight,
 
-					sumWeights = swarmWeights+wanderWeight+avoidWeight;
+					sumWeights = swarmWeights+wanderWeight+avoidWeight,
 
-				if(this.schedule.swarm.wait <= 0) {
-					this.schedule.swarm.force = Force.swarm(this.swarm);
-					this.schedule.swarm.wait += this.schedule.swarm.delay;
+					time = Date.now();
+
+				if(this.swarm.schedule.check(time)) {
+					this.swarm.force = Force.swarm(this.swarm);
+					this.swarm.schedule.last = time;
 				}
-				if(this.schedule.wander.wait <= 0) {
+				if(this.wander.schedule.check(time)) {
 					if(this.vel.magSq()) {
 						this.wander.vel.copy(this.vel.unit()
 							.doScale(this.wander.minSpeed));
@@ -1814,27 +2148,27 @@
 							Math.sin(angle))).doScale(this.wander.minSpeed);
 					}
 
-					this.schedule.wander.force = Force.wander(this.wander)
+					this.wander.force = Force.wander(this.wander)
 							.doScale(wanderWeight);
 
-					this.schedule.wander.wait += this.schedule.wander.delay;
+					this.wander.schedule.last = time;
 				}
-				if(this.schedule.avoid.wait <= 0) {
-					this.schedule.avoid.force = Force.avoidWalls(
+				if(this.avoid.schedule.check(time)) {
+					this.avoid.force = Force.avoidWalls(
 						$.extend({}, this.avoid, {
 							radius: this.shape.boundRad.rad+this.avoid.radius,
 							lumens: ((this.avoid.lumens.toroid)? null
 								:	this.avoid.lumens)
 						}));
 
-					this.schedule.avoid.wait += this.schedule.avoid.delay;
+					this.avoid.schedule.last = time;
 				}
 
-				this.force.doAdd(this.schedule.swarm.force.doPinToRange(0,
+				this.force.doAdd(this.swarm.force.doPinToRange(0,
 						swarmWeights/sumWeights*this.maxForce))
-					.doAdd(this.schedule.wander.force.doPinToRange(0,
+					.doAdd(this.wander.force.doPinToRange(0,
 						wanderWeight/sumWeights*this.maxForce))
-					.doAdd(this.schedule.avoid.force.doPinToRange(0,
+					.doAdd(this.avoid.force.doPinToRange(0,
 						avoidWeight/sumWeights*this.maxForce));
 
 				return Entity.prototype.update.call(this);
@@ -1848,18 +2182,15 @@
 				swarm: {
 					swarm: null, nearbyRad: 90, predict: 0.6,
 					weight: { separation: 0.601,
-						cohesion: 0.021, alignment: 0.454 }
+						cohesion: 0.021, alignment: 0.454 },
+					force: new Vec2D(), schedule: { wait: 1000/10 }
 				},
-				wander: { vel: new Vec2D(), range: 0.6,
-					minSpeed: 0.8, weight: 1.501 },
-				avoid: { point: null, walls: null, lumens: null, radius: 70,
-					predict: 0.8, weight: 0.75 },
-
-				schedule: {
-					swarm: { delay: 1000/10, wait: 0, force: null },
-					wander: { delay: 1000/30, wait: 0, force: null },
-					avoid: { delay: 1000/50, wait: 0, force: null }
-				},
+				wander: { vel: new Vec2D(), range: 0.6, minSpeed: 0.8,
+					weight: 1.501, force: new Vec2D(),
+					schedule: { wait: 1000/30 } },
+				avoid: { point: null, walls: null, lumens: null,
+					radius: 70, predict: 0.8, weight: 0.75, force: new Vec2D(),
+					schedule: { wait: 1000/50 } },
 				maxForce: 0.006
 			}
 		});
@@ -2451,6 +2782,9 @@
 					walls.push(Network.loadWall(JSON[w]));
 				}
 
+				/* TODO: call THREE.GeometryUtils.merge() to improve
+					rendering performance for the static walls */
+
 				return walls;
 			},
 			loadWall: function(JSON) {
@@ -2538,6 +2872,9 @@
 		}
 		$.extend(Lumens.prototype, {
 			step: function() {
+				/* TODO: alternating schedule for entity updates/resolutions
+					depending on whether or not they're within a given area
+					(viewport visible area maybe) */
 				var lumens = this,
 					currentTime = Date.now(), dt = currentTime-this.time;
 				
@@ -2579,16 +2916,16 @@
 						walls: this.walls, lumens: this }, dt);
 
 					this.player.update(dt);
-
-					/* Render */
-					/* Should be done asynchronously, through web workers:
-					// Render called in viewport
-					if(this.running) {
-						setTimeout(this.step.call, 1000/60, this);
-					} */
-
-					this.viewport.render();
 				}
+
+				/* Render */
+				/* Should be done asynchronously, through web workers:
+				// Render called in viewport
+				if(this.running) {
+					setTimeout(this.step.call, 1000/60, this);
+				} */
+
+				this.viewport.render();
 
 				requestAnimationFrame(function() { lumens.step(); });
 
@@ -2603,19 +2940,20 @@
 			},
 			addPredator: function() {
 				var angle = Math.random()*2*Math.PI,
-					schedule = Predator.settings.schedule,
+					settings = Predator.settings,
 					predator = new Predator({
-							swarm: { swarm: this.swarm },
-							avoid: { walls: this.walls, lumens: this },
+							swarm: { swarm: this.swarm,
+								schedule: { last: Math.random()*
+									settings.swarm.schedule.wait } },
+							wander: { schedule: { last: Math.random()*
+									settings.wander.schedule.wait } },
+							avoid: { walls: this.walls, lumens: this,
+								schedule: { last: Math.random()*
+									settings.avoid.schedule.wait } },
 							pos: new Vec2D(Math.random()*this.boundRect.size.x,
 								Math.random()*this.boundRect.size.y),
 							angle: new Vec2D(Math.cos(angle),
-									Math.sin(angle)),
-							schedule: {
-								swarm: { wait: Math.random()*schedule.swarm.delay },
-								wander: { wait: Math.random()*schedule.wander.delay },
-								avoid: { wait: Math.random()*schedule.avoid.delay }
-							}
+									Math.sin(angle))
 						});
 				
 				this.swarm.add(predator);
@@ -2703,6 +3041,17 @@
 			});
 
 			var AIFolder = predatorFolder.addFolder("AI");
+			
+			AIFolder.add(Predator.settings, "maxForce", 0, 1)
+			.step(0.005).listen().onChange(function(maxForce) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].maxForce = maxForce;
+				}
+			});
+
+			var swarmFolder = AIFolder.addFolder("swarm"),
+				wanderFolder = AIFolder.addFolder("wander"),
+				avoidFolder = AIFolder.addFolder("avoid");
 
 			function setWeight(weight, influence) {
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
@@ -2714,81 +3063,77 @@
 			gui.remember(Predator.settings.swarm);
 			gui.remember(Predator.settings.swarm.weight);
 
-			AIFolder.add(Predator.settings.swarm.weight, "separation",
+			swarmFolder.add(Predator.settings.swarm.weight, "separation",
 			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "separation");
 			});
-			AIFolder.add(Predator.settings.swarm.weight, "cohesion",
+			swarmFolder.add(Predator.settings.swarm.weight, "cohesion",
 			0, 0.1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "cohesion");
 			});
-			AIFolder.add(Predator.settings.swarm.weight, "alignment",
+			swarmFolder.add(Predator.settings.swarm.weight, "alignment",
 			0, 1).step(0.001).listen().onChange(function(weight) {
 				setWeight(weight, "alignment");
 			});
 
-			AIFolder.add(Predator.settings.swarm, "predict",
+			swarmFolder.add(Predator.settings.swarm, "predict",
 			0, 5).step(0.001).listen().onChange(function(predict) {
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
 					lumens.swarm.source[p].swarm.predict = predict;
 				}
 			});
-
-			var wander = Predator.settings.wander,
-				wanderSettings = { wander: wander.weight, minSpeed: wander.minSpeed };
-			
-			gui.remember(wanderSettings);
-
-			AIFolder.add(wanderSettings, "wander", 0, 10).step(0.001)
-			.onChange(function(weight) {
-				wander.weight = weight;
-
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].wander.weight = weight;
-				}
-			});
-			AIFolder.add(wanderSettings, "minSpeed", 0, 10).step(0.001)
-			.onChange(function(speed) {
-				wander.minSpeed = speed;
-
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].wander.minSpeed = speed;
-				}
-			});
-
-			var avoid = Predator.settings.avoid,
-				avoidSettings = { avoid: avoid.weight, avoidRadius: avoid.radius };
-			
-			gui.remember(avoidSettings);
-
-			AIFolder.add(avoidSettings, "avoid", 0, 10).step(0.001)
-			.onChange(function(weight) {
-				avoid.weight = weight;
-
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].avoid.weight = weight;
-				}
-			});
-			AIFolder.add(avoidSettings, "avoidRadius", 0, 100).step(0.001)
-			.onChange(function(radius) {
-				avoid.radius = radius;
-
-				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].avoid.radius = radius;
-				}
-			});
-			
-			AIFolder.add(Predator.settings.swarm, "nearbyRad", 0, 1000)
+			swarmFolder.add(Predator.settings.swarm, "nearbyRad", 0, 1000)
 			.step(0.05).listen().onChange(function(rad) {
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
 					lumens.swarm.source[p].swarm.nearbyRad = rad;
 				}
 			});
-			
-			AIFolder.add(Predator.settings, "maxForce", 0, 1)
-			.step(0.005).listen().onChange(function(maxForce) {
+			swarmFolder.add(Predator.settings.swarm.schedule, "wait", 0, 1000)
+			.step(0.05).listen().onChange(function(w) {
 				for(var p = 0; p < lumens.swarm.source.length; ++p) {
-					lumens.swarm.source[p].maxForce = maxForce;
+					lumens.swarm.source[p].swarm.schedule.wait = w;
+				}
+			});
+
+			gui.remember(Predator.settings.wander);
+
+			wanderFolder.add(Predator.settings.wander, "weight", 0, 10).step(0.001)
+			.onChange(function(weight) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].wander.weight = weight;
+				}
+			});
+			wanderFolder.add(Predator.settings.wander, "minSpeed", 0, 10).step(0.001)
+			.onChange(function(speed) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].wander.minSpeed = speed;
+				}
+			});
+			wanderFolder.add(Predator.settings.wander.schedule, "wait", 0, 1000)
+			.step(0.05).listen().onChange(function(w) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].wander.schedule.wait = w;
+				}
+			});
+			
+			gui.remember(Predator.settings.avoid);
+
+			avoidFolder.add(Predator.settings.avoid, "weight", 0, 10).step(0.001)
+			.onChange(function(weight) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].avoid.weight = weight;
+				}
+			});
+			avoidFolder.add(Predator.settings.avoid, "radius", 0, 100).step(0.001)
+			.onChange(function(radius) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].avoid.radius = radius;
+				}
+			});
+			avoidFolder.add(Predator.settings.avoid.schedule, "wait", 0, 1000)
+			.step(0.05).listen().onChange(function(w) {
+				for(var p = 0; p < lumens.swarm.source.length; ++p) {
+					lumens.swarm.source[p].avoid.schedule.wait = w;
 				}
 			});
 
@@ -2799,7 +3144,6 @@
 			viewportFolder.add(lumens.viewport.springForce, "damping", 0, 1).listen();
 			viewportFolder.add(lumens.viewport.springForce, "factor", 0, 1).listen();
 			viewportFolder.add(lumens.viewport, "invMass", 0.01, 1).listen();
-
 
 			gui.remember(lumens);
 			gui.remember(lumens.boundRect.size);

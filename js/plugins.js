@@ -20,6 +20,27 @@ if(!window.requestAnimationFrame) {
 		};
 }
 
+/* Safely retrieve a property from an object along its property
+	path - returns null if it doesn't exist
+	String path: "prop1.prop2.prop3" = object.prop1.prop2.prop3 */
+function safeGet(object, path) {
+	var value = null;
+
+	if(object) {
+		var pieces = path.split("."), node = object;
+
+		for(var p = 0; p < pieces.length-1; ++p) {
+			node = node[pieces[p]];
+
+			if(!node) { return value; }
+		}
+
+		value = node[pieces.wrap(-1)];
+	}
+	
+	return value;
+}
+
 (function($) {
 	/* Math */
 	$.extend(Math, {

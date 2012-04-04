@@ -2,29 +2,30 @@
 	arguments are objects which extend it
 	The first argument may also be set to true, indicating a deep extension
 	- in this case, the second object is the object to be extended */
+
 function extend() {
-	var first = 0, object = arguments[first], ext;
+	var s = 0, deep = arguments[s];
 
-	if(object === true) {
-		object = arguments[++first];
-		ext = function(extender, key) {
-			var val = extender[key];
-			if(val) {  }
-			else { object[key] = val; }
-		};
-	}
-	else { ext = function(extender, key) { object[key] = extender[key]; }; }
+	if(deep === true) { ++s; }
+	else { deep = false; }
 
-	function each() {
-		for(var a in arguments) {
-			var extender = arguments[a];
-			for(var e in extender) { ext(extender, e); }
+	var target = arguments[s++], source;
+
+	for(s; s < arguments.length; ++s) {
+		source = arguments[s];
+		
+		for(var p in source) {
+			var prop = source[p];
+
+			if(deep && prop && prop.constructor && prop.constructor === Object) {
+				if(!target[p]) { target[p] = {}; }
+				arguments.callee(target[p], prop);
+			}
+			else { target[p] = source[p]; }
 		}
 	}
 
-	each.apply(null, Array.prototype.slice.call(arguments, first+1));
-
-	return object;
+	return target;
 }
 
 
