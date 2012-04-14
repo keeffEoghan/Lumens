@@ -1590,6 +1590,11 @@
 
 			this.three = options.three;	//  THREE.Mesh
 
+			this.properties = {
+				geometry: {},
+				material: {}
+			};
+
 			this.boundRad = new Circle();
 			this.treeItem = null;
 			this.resolve();
@@ -1600,7 +1605,7 @@
 				this.three.position.x = this.owner.pos.x;
 				this.three.position.y = this.owner.pos.y;
 
-				//this.updateBounds();
+				this.updateBounds();
 
 				return this;
 			},
@@ -1658,128 +1663,8 @@
 //	}
 
 //	LIGHT {
-		/* Notes:
-			THREE composes shaders together from fragments (renderers/WebGLRenderer)
-			
-				These seem to be remade and recompiled whenever certain
-				things change - such as the number and types of lights
-
-				This speeds certain things up - for example, using
-				precompiled commands (#if, etc) instead of branching
-				statements (if, etc) improves performance on the GPU
-			
-			ShaderMaterial can be used to load in a custom shader
-			
-				Use a single virtual screen quad aligned to the camera
-				(later, first just have each raytraced object use the shader)
-			
-				Can the existing work done in THREE be used (phong)?
-			
-			Spotlight should therefore be fairly small class, and
-			Pointlight not needed
-			
-				Only needs to contain enough information to work well with
-				THREE, and proper clipping stuff for its cone (don't think
-				this is included in THREE)
-				Pointlight already exists, and does everything we need it to
-			
-			Since the ray-object intersections are calculated in the vertex
-			shader, the objects must be passed into the shader,
-			via a data texture - since UBOs aren't in WebGL
-
-			This link is particularly useful, with equations for
-			reflection, refraction: http://www.cs.unc.edu/~rademach/xroads-RT/RTarticle.html
-
-			So, define a simple-ish Spotlight class, and a hard RayTracer
-			class (if the shader needs to be updated and recompiled, or
-			unique for each object)
-				
-				RayTracer will hold a shader which simulates the
-				eye, primary, shadow, reflective, and refractive rays
-				
-				It checks for and processes any intersections and clipping
-				on the way back to each light source
-
-			The scene can be passed as an array of vertices and another
-			of triangles referencing it, which the shader can test collisions
-			against
-
-				Bounding Radii, Object IDs and the bottom layer of the
-				QuadTree (an uneven grid) could also be passed via
-				textures as higher levels of abstraction again, further
-				simplifying intersection tests (Quad -> BRad -> Tris)
-
-				This will make intersection code simpler by only needing
-				to check against triangles (export as triangle mesh,
-				or call THREE.GeometryUtils.triangulateQuads) - see http://www.blackpawn.com/texts/pointinpoly/default.html
-				for an excellent explanation of the barycentric coordinate
-				test
-
-				Retrieving information from a texture map for colour
-				is also neccessary (sampler2D)
-
-				Walls must always intersect rays - either the walls must
-				always be geometries which are higher than the light
-				source (check THREE.ExtrudeGeometry for a possible way to
-				extrude from a line at runtime - https://github.com/mrdoob/three.js/blob/master/src/extras/geometries/ExtrudeGeometry.js,
-				https://github.com/mrdoob/three.js/blob/master/src/extras/core/Path.js,
-				and https://github.com/mrdoob/three.js/blob/master/src/extras/core/Shape.js),
-				or some code to handle this specific case (infinite height
-				objects) must be written into the shader
-
-				Evans' fragment shader skeleton code:
-
-					vec3 ray = initialRay;
-					vec3 origin = intitialOrigin;
-
-					vec3 colorMask = vec3(1.0);
-					vec3 accumulatedColor = vec3(0.0);
-
-					for(int bounce = 0; bounce < 5; bounce++) {
-						float t = [compute t from objects];
-						vec3 hit = origin+ray*t;
-
-						vec3 materialColor = [compute material color from hit];
-						float directLighting = [compute direct lighting from hit];
-
-						// accumulate incoming light
-						colorMask *= materialColor;
-						accumulatedColor += colorMask*directLighting;
-
-						ray = [compute next ray];
-						origin = hit;
-					}
-
-					gl_FragColor = accumulatedColor;
-
-			THREE objects are very simple, and THREE.WebGLRenderer bears alot
-			of the weight of setting them up as renderable objects - this
-			setup cannot be done without calling render, and we don't
-			want to render the scene graph itself (just use it as a source
-			for the screen shader)
-
-				The neccessary parts are vertex/matrix setup - which
-				pass the transformation matrices to the vertex shaders -
-				maybe the scene graph stuff; and exclude the actual
-				rendering, shadowmap, etc
-
-				Since the ray tracing shader needs this data for each
-				object in the scene, it must also be passed along
-				with the vertices, bounding radii, textures, object IDs,
-				and resolved Quad Tree as global data in a heirarchy
-
-					QuadTree
-						ObjectIDs
-
-				Copy THREE.WebGLRenderer into a WebGLRayTracer and remove
-				all but these neccessary parts of code, set it up with a
-				single screen and shader, and pipe all the data it needs
-				in from the rest of the code (instead of rendering, as it
-				currently is, it will populate the ray tracing shader
-				textures properly with its data) */
-
 		/* http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/ */
-		function Spotlight(options) {
+		function SpotLight(options) {
 			if(!options) { options = {}; }
 
 			THREE.PointLight.call(this, options.hex,
@@ -1790,8 +1675,7 @@
 			this.direction = (options.direction || new THREE.Vector3());
 			this.angle = (options.angle || 0);
 
-			this.cosAngle = Math.cos(angle);
-			this.falloff = (options.falloff || 1.0);	// Exponent determining falloff towards edges of spot
+			this.falloff = (options.falloff || 0.0);	// Exponent determining falloff towards edges of spot
 
 			this.pos = new Vec2D(this.position.x, this.position.y);
 			this.dir = new Vec2D(this.direction.x, this.direction.y);
@@ -1800,7 +1684,7 @@
 			this.treeItem = null;
 			this.update();
 		}
-		$.extend(inherit(Spotlight, THREE.PointLight).prototype, {
+		$.extend(inherit(SpotLight, THREE.PointLight).prototype, {
 			update: function() {
 				/* var dist = new Vec2D().copy(this.direction.clone()
 								.multiplyScalar(this.distance/2)).mag()+
@@ -1833,33 +1717,79 @@
 		});
 
 
-		function RayTracer(hits, lights, scene) {
-			// Require OES_texture_float?
-			this.hits = hits;
-			this.scene = scene;
+		function RayTracer(options) {
+			if(!options) { options = {}; }
+
+			/* Require OES_texture_float? *//*
+			if(!gl.getExtension("OES_texture_float")) {
+				throw("Requires OES_texture_float extension");
+			}
+			*/
+
+			this.scene = options.scene;
+			this.meshTree = options.meshTree;
+			this.maxHits = options.maxHits;
+
+			this.maxRays = this.numQuadTreeNodes =
+				this.numMeshes = this.numTriangles = 0;
 
 			this.uniforms = THREE.UniformsUtils.merge([
 				THREE.UniformsLib["fog"],
 				{
-					'ambientLightColor' : { type: 'fv', value: [] },
-					'pointLightColor' : { type: 'fv', value: [] },
-					'pointLightPosition' : { type: 'fv', value: [] },
-					'pointLightDistance' : { type: 'fv1', value: [] },
+					ambientLightColor: { type: 'fv', value: [] },
+					pointLightColor: { type: 'fv', value: [] },
+					pointLightPosition: { type: 'fv', value: [] },
+					pointLightDistance: { type: 'fv1', value: [] },
 
-					'spotLightDirection' : { type: 'fv', value: [] },
-					'spotLightCosAngle' : { type: 'fv1', value: [] },
-					'spotLightFalloff' : { type: 'fv1', value: [] },
+					spotLightDirection: { type: 'fv', value: [] },
+					spotLightCosAngle: { type: 'fv1', value: [] },
+					spotLightFalloff: { type: 'fv1', value: [] },
 
-					/* TODO: merge objectMatrices, normalMatrices,
-						boundingSpheres, and properties into one bigger texture */
-					'dataLists': { type: 't', value: 0, texture: null },
-					'quadTree': { type: 't', value: 1, texture: null },
-					'objectMatrices': { type: 't', value: 2, texture: null },
-					'normalMatrices': { type: 't', value: 3, texture: null },
-					'boundingSpheres': { type: 't', value: 4, texture: null },
-					'triangles': { type: 't', value: 5, texture: null },
-					'properties': { type: 't', value: 6, texture: null },
-					'infinity': { type: 'f', value: 10000 }
+					/* N*(2*RGB+1*RGBA) - [xmin, ymin, zmin][xmax, ymax, zmax]
+						[subNodesIndex, numSubNodes, meshesIndex, numMeshes] */
+					quadTree: { type: 't', value: 0,
+						texture: new THREE.DataTexture([], 0, 0,
+							THREE.RGBAFormat, THREE.FloatType,
+							undefined, undefined, undefined,
+							THREE.NearestFilter, THREE.NearestFilter) },
+					/*quadTree: { type: 't', value: 0,
+						texture: new THREE.DataTexture([], 0, 0,
+							THREE.RGBAFormat, THREE.IntType,
+							undefined, undefined, undefined,
+							THREE.NearestFilter, THREE.NearestFilter) },*/
+
+					/* M*(13*RGBA - [x, y, z, radius]
+
+							[c0r0, c0r1, c0r2, c0r3][c1r0, c1r1, c1r2, c1r3][c2r0, c2r1, c2r2, c2r3][c3r0, c3r1, c3r2, c3r3]
+							[c0r0, c0r1, c0r2, c0r3][c1r0, c1r1, c1r2, c1r3][c2r0, c2r1, c2r2, c2r3][c3r0, c3r1, c3r2, c3r3]
+
+							[trianglesIndex, numTriangles, reflect, iOR][rdiff, gdiff, bdiff, textureID]
+							[ramb, gamb, bamb, opacity][rspec, gspec, bspec, shine] */
+					meshes: { type: 't', value: 1,
+						texture: new THREE.DataTexture([], 0, 0,
+							THREE.RGBAFormat, THREE.FloatType,
+							undefined, undefined, undefined,
+							THREE.NearestFilter, THREE.NearestFilter) },
+					/*meshes: { type: 't', value: 1,
+						texture: new THREE.DataTexture([], 0, 0,
+							THREE.RGBAFormat, THREE.IntType,
+							undefined, undefined, undefined,
+							THREE.NearestFilter, THREE.NearestFilter) },*/
+
+					/* T*(3*RGB+3*RGBA) - [xp0, yp0, zp0][xp1, yp1, zp1][xp2, yp2, zp2]
+						[xnp0, ynp0, znp0, xnf][xnp1, ynp1, znp1, ynf][xnp2, ynp2, znp2, znf] */
+					triangles: { type: 't', value: 2,
+						texture: new THREE.DataTexture([], 0, 0,
+							THREE.RGBAFormat, THREE.FloatType,
+							undefined, undefined, undefined,
+							THREE.NearestFilter, THREE.NearestFilter) },
+					/*triangles: { type: 't', value: 2,
+						texture: new THREE.DataTexture([], 0, 0,
+							THREE.RGBAFormat, THREE.IntType,
+							undefined, undefined, undefined,
+							THREE.NearestFilter, THREE.NearestFilter) },*/
+
+					infinity: { type: 'f', value: 10000 }
 				}]);
 
 			this.fragment = '';
@@ -1872,20 +1802,202 @@
 				fog: true
 			});
 
-			this.update();
+			this.update().setup();
 		}
 		$.extend(RayTracer.prototype, {
-			update: function() {
-				for(var b = 0, maxRays = 1; b < this.hits;
-					maxRays += (2+scene.__lights.length)*Math.pow(2, b++)) {}
+			setup: function() {
+				this.maxRays = 1;
 
-				this.fragment = '#define MAX_HITS '+hits+'\
-					#define MAX_RAYS '+maxRays+'\n'+
-					this.fragmentHeader+this.structs+
-					this.dataLists+this.readData+this.intersections+
-					this.whittedRayTracer+this.fragmentMain;
+				for(var b = 0; b < this.maxHits;
+					this.maxRays += (2+scene.__lights.length)*
+						Math.pow(2, b++)) {}
+				
+				// toExponential ensures a float representation
+				this.fragment =
+					'#define MAX_HITS '+this.maxHits+'\n\
+					#define MAX_HITS_F '+this.maxHits+'.0\n\
+					#define MAX_RAYS '+this.maxRays+'\n\
+					#define MAX_RAYS_F '+this.maxRays+'.0\n\
+					#define NUM_QUAD_TREE_NODES '+this.numQuadTreeNodes+'\n\
+					#define NUM_QUAD_TREE_NODES_F '+this.numQuadTreeNodes+'.0\n\
+					#define NUM_MESHES '+this.numMeshes+'\n\
+					#define NUM_MESHES_F '+this.numMeshes+'.0\n\
+					#define NUM_TRIANGLES '+this.numTriangles+'\n\
+					#define NUM_TRIANGLES_F '+this.numTriangles+'.0\n\n'+
 
-				// TODO: dirty material
+					this.fragmentHeader+'\n'+this.structs+'\n'+this.util+
+					'\n'+this.readData+'\n'+this.intersections+'\n'+
+					this.whittedRayTracer+'\n'+this.fragmentMain;
+
+				// Dirty material(?)
+				//this.refresh();
+
+				return this;
+			},
+			update: function() { return this.updateDataTextures().updateLights(); },
+			updateDataTextures: function() {
+				var quadTreeTexture = this.uniforms.quadTree.texture,
+					meshesTexture = this.uniforms.meshes.texture,
+					trianglesTexture = this.uniforms.triangles.texture,
+
+					// Quadtree tier
+					nodesData = quadTreeTexture.image.data, meshIndex = 0,
+					// Mesh tier
+					meshesData = meshesTexture.image.data, triangleIndex = 0,
+					// Primitive tier
+					trianglesData = trianglesTexture.image.data,
+
+					node = this.meshTree.root, nodes = [node];
+
+				nodesData.length = meshesData.length =
+					trianglesData.length = 0;
+
+				// Quadtree tier
+				for(var n = 0; n < nodes.length; node = nodes[++n]) {
+					var kids = node.kids.concat(node.borderKids),
+						minZ = Infinity, maxZ = -Infinity;
+
+					// Mesh tier
+					for(var k = 0; k < kids.length; ++k) {
+						var shape = kids[k].shape,
+							mesh = shape.three,
+							geometry = mesh.geometry,
+							vertices = geometry.vertices,
+							faces = geometry.faces;
+
+						// Primitive tier
+						for(var f = 0; f < faces.length; ++f) {
+							/* Assumes all faces are faces3 (ensure
+								exporting only triangles, or see
+								THREE.GeometryUtils.triangulateQuads)
+								and that all faces share the same material */
+							var face = faces[f],
+								a = vertices[face.a].position,
+								b = vertices[face.b].position,
+								c = vertices[face.c].position,
+
+								vertexNormals = face.vertexNormals,
+								an = vertexNormals[0],
+								bn = vertexNormals[1],
+								cn = vertexNormals[2],
+								fn = face.normal;
+
+							trianglesData.push(a.x, a.y, a.z, 0,
+								b.x, b.y, b.z, 0,
+								c.x, c.y, c.z, 0,
+								an.x, an.y, an.z, fn.x,
+								bn.x, bn.y, bn.z, fn.y,
+								cn.x, cn.y, cn.z, fn.z);
+
+							for(var v = 0; v < vertices.length; ++v) {
+								var z = vertices[v].position.z;
+
+								if(z < minZ) { minZ = z; }
+								if(z > maxZ) { maxZ = z; }
+							}
+						}
+
+						var bR = shape.boundRad,
+							ctr = bR.position,
+
+							flatObjectMatrix = mesh.object.matrixWorld
+								.flattenToArray(),
+
+							flatNormalMatrix = THREE.Matrix4
+								.makeInvert3x3(mesh.object.matrixWorld)
+								.transposeIntoArray(),
+
+							props = shape.properties,
+
+							gProps = props.geometry,
+
+							mProps = props.material,
+							diff = mProps.diffuse,
+							amb = mProps.ambient,
+							spec = mProps.specular;
+
+						meshesData = meshesData.concat(ctr.x, ctr.y, ctr.z, bR.rad,
+							flatObjectMatrix,
+							flatNormalMatrix,
+							triangleIndex, faces.length, gProps.reflect, gProps.iOR,
+							diff.r, diff.g, diff.b, 0,
+							amb.r, amb.g, amb.b, mProps.opacity,
+							spec.r, spec.g, spec.b, mProps.shine);
+
+						triangleIndex += faces.length;
+					}
+
+					var min = node.bounds.min, max = node.bounds.max;
+
+					/* TODO: min and max z */
+					nodesData.push(min.x, min.y, minZ, 0,
+						max.x, max.y, maxZ, 0,
+						nodes.length, node.nodes.length, meshIndex, kids.length);
+
+					meshIndex += kids.length;
+					nodes = nodes.concat(node.nodes);
+				}
+
+				quadTreeTexture.image.width =
+					this.numQuadTreeNodes = nodes.length;
+				quadTreeTexture.image.height = 3;
+
+				meshesTexture.image.width = 
+					this.numMeshes = meshIndex+1;
+				meshesTexture.image.height = 13;
+
+				trianglesTexture.image.width =
+					this.numTriangles = triangleIndex+1;
+				trianglesTexture.image.height = 6;
+
+				quadTreeTexture.needsUpdate =
+					meshesTexture.needsUpdate =
+						trianglesTexture.needsUpdate = true;
+
+				return this;
+			},
+			updateLights: function() {
+				/* Note: updating the number and types of lights can't be done without
+					rebuilding the shader program - set material.needsUpdate to true
+					(can't find this in the source though - delete material.program instead?)
+					https://github.com/mrdoob/three.js/wiki/Updates
+
+					An alternative may be to set it up a budgeted number of lights with
+					dummy information (0 intensity)
+
+					Then again, this could be out of date entirey... */
+
+				for(var l = 0, vecOffset = 0, lights = this.scene.__lights, ll = lights.length;
+					l < ll; ++l, vecOffset = l*3) {
+					var light = lights[l];
+
+					if(light instanceof SpotLight) {
+						this.uniforms.spotLightDirection[vecOffset] = light.direction.x;
+						this.uniforms.spotLightDirection[vecOffset+1] = light.direction.x;
+						this.uniforms.spotLightDirection[vecOffset+2] = light.direction.x;
+
+						this.uniforms.spotLightCosAngle[l] = cos(light.angle);
+						this.uniforms.spotLightFalloff[l] = light.falloff;
+					}
+					else {
+						this.uniforms.spotLightDirection[vecOffset] =
+							this.uniforms.spotLightDirection[vecOffset+1] =
+								this.uniforms.spotLightDirection[vecOffset+2] = 0;
+
+						this.uniforms.spotLightCosAngle[l] =
+							this.uniforms.spotLightFalloff[l] = -1.0;
+					}
+				}
+
+				return this;
+			},
+			setHits: function(hits) {
+				this.hits = hits;
+				return this.setup();
+			},
+			refresh: function() {
+				this.material.needsUpdate = true;
+				//delete this.material.program;
 
 				return this;
 			},
@@ -1911,12 +2023,12 @@
 				https://github.com/mrdoob/three.js/blob/master/src/renderers/WebGLRenderer.js#L774 */
 			vertex:
 				// For passing interpolated position to fragment
-				'varying vec4 pos;\
-				\
-				void main() {\
-					pos = (objectMatrix*vec4(position, 1.0));\
-					gl_Position = projectionMatrix*modelViewMatrix*\
-						vec4(position, 1.0);\
+				'varying vec4 pos;\n\
+				\n\
+				void main() {\n\
+					pos = (objectMatrix*vec4(position, 1.0));\n\
+					gl_Position = projectionMatrix*modelViewMatrix*\n\
+							vec4(position, 1.0);\n\
 				}',
 
 			/* Supplied by THREE:
@@ -1940,363 +2052,386 @@
 				"uniform vec3 specular;"+
 				"uniform float shininess;"+*/
 
-				'#define EPSILON 0.01\
-				\
-				uniform vec3 ambientLightColor;\
-				\
-				#if MAX_POINT_LIGHTS > 0\
-					uniform vec3 pointLightColor[MAX_POINT_LIGHTS];\
-					uniform vec3 pointLightPosition[MAX_POINT_LIGHTS];\
-					uniform float pointLightDistance[MAX_POINT_LIGHTS];\
-					\
-					uniform vec3 spotLightDirection[MAX_POINT_LIGHTS];\
-					uniform float spotLightCosAngle[MAX_POINT_LIGHTS];\
-					uniform float spotLightFalloff[MAX_POINT_LIGHTS];\
-				#endif\
-				\
-				/* 3 null-terminated, arbitrary-length data lists,\
-					packed into one RGBA texture, with each channel\
-					(r, g, b, a) representing a separate list */\
-				uniform sampler2D dataLists;\
-				\
-				/* Global scene data stored in textures */\
-				uniform sampler2D quadTree;\
-				uniform sampler2D objectMatrices;\
-				uniform sampler2D normalMatrices;\
-				uniform sampler2D boundingSpheres;\
-				uniform sampler2D triangles;\
-				uniform sampler2D properties;\
-				\
-				uniform float infinity;\
-				\
-				varying vec4 pos;\
-				\
-				const float dataListStep = 1.0/DATA_LIST_LENGTH;\
-				const float quadTreeStep = 1.0/QUAD_TREE_NODES;\
-				\
-				const float nodeStep = 1.0/2.0;\
-				const float nodePad = 0.5/2.0;\
-				const float matColStep = 1.0/4.0;\
-				const float matColPad = 0.5/4.0;\
-				const float triPointStep = 1.0/6.0;\
-				const float triPointPad = 0.5/6.0;\
-				const float propsStep = 1.0/4.0;\
-				const float propsPad = 0.5/4.0;\
-				\
-				const float mediumIOR = 1.0;',
+				'#define PAD 0.25\n\
+				\n\
+				#define NODE_STEP '+(1.0/3.0).toExponential()+'\n\
+				#define NODE_PAD '+(0.25/3.0).toExponential()+'\n\
+				\n\
+				#define MESH_DATA_STEP '+(1.0/13.0).toExponential()+'\n\
+				#define MESH_DATA_PAD '+(0.25/13.0).toExponential()+'\n\
+				#define BOUNDING_SPHERE_OFFSET 0.0\n\
+				#define OBJECT_MATRIX_OFFSET '+(1.0/13.0).toExponential()+'\n\
+				#define NORMAL_MATRIX_OFFSET '+(5.0/13.0).toExponential()+'\n\
+				#define GEOMETRY_OFFSET '+(9.0/13.0).toExponential()+'\n\
+				#define MATERIAL_OFFSET '+(10.0/13.0).toExponential()+'\n\
+				\n\
+				#define TRI_POINT_STEP '+(1.0/6.0).toExponential()+'\n\
+				#define TRI_POINT_PAD '+(0.25/6.0).toExponential()+'\n\
+				\n\
+				#define MEDIUM_IOR 1.0\n\
+				#define EPSILON 0.01\n\
+				\n\
+				uniform vec3 ambientLightColor;\n\
+				\n\
+				#if MAX_POINT_LIGHTS > 0\n\
+					uniform vec3 pointLightColor[MAX_POINT_LIGHTS];\n\
+					uniform vec3 pointLightPosition[MAX_POINT_LIGHTS];\n\
+					uniform float pointLightDistance[MAX_POINT_LIGHTS];\n\
+					\n\
+					uniform vec3 spotLightDirection[MAX_POINT_LIGHTS];\n\
+					uniform float spotLightCosAngle[MAX_POINT_LIGHTS];\n\
+					uniform float spotLightFalloff[MAX_POINT_LIGHTS];\n\
+				#endif\n\
+				\n\
+				/* Global scene data stored in textures */\n\
+				uniform sampler2D quadTree;\n\
+				uniform sampler2D meshes;\n\
+				uniform sampler2D triangles;\n\
+				\n\
+				uniform float infinity;\n\
+				\n\
+				varying vec4 pos;',
 				
 			structs:
-				'struct AABBox {\
-					vec3 min;\
-					vec3 max;\
-				}\
-				\
-				struct Node {\
-					AABBox bounds;\
-					float subNodesIndex;\
-					float meshesIndex;\
-				}\
-				\
-				struct Sphere {\
-					vec3 pos;\
-					float rad;\
-				}\
-				\
-				struct Triangle {\
-					vec3 points[3];\
-					vec3 normals[3];\
-					vec3 faceNormal;\
-				}\
-				\
-				struct Properties {\
-					float reflect;\
-					float iOR;\
-					float shine;\
-					float opacity;\
-					\
-					vec3 diffuse;	/* If textureID is valid, multiply texel by diffuse, if not, just use diffuse */\
-					int textureID;\
-					vec3 ambient;\
-					vec3 specular;\
-				}\
-				\
-				struct Ray {\
-					vec3 origin;\
-					vec3 dir;\
-					\
-					int hit;	/* Records the number of times this ray has bounced in the scene */\
-					\
-					vec3 light;	/* The light being transmitted (color, energy) */\
-					float iOR;	/* The index of refraction of the medium the ray is currently travelling through */\
-					int tLight;	/* The distance to the target light - set for shadow rays, -1.0 otherwise */\
-				}',
+				'struct Ray {\n\
+					vec3 origin;\n\
+					vec3 dir;\n\
+					\n\
+					int hit;	/* Records the number of times this ray has bounced in the scene */\n\
+					\n\
+					vec3 light;	/* The light being transmitted (color, energy) */\n\
+					float iOR;	/* The index of refraction of the medium the ray is currently travelling through */\n\
+					int tLight;	/* The distance to the target light - set for shadow rays, -1.0 otherwise */\n\
+				};\n\
+				\n\
+				struct AABBox {\n\
+					vec3 min;\n\
+					vec3 max;\n\
+				};\n\
+				\n\
+				struct Node {\n\
+					AABBox bounds;\n\
+					float subNodesIndex;\n\
+					float numSubNodes;\n\
+					float meshesIndex;\n\
+					float numMeshes;\n\
+				};\n\
+				\n\
+				struct Sphere {\n\
+					vec3 pos;\n\
+					float rad;\n\
+				};\n\
+				\n\
+				struct Triangle {\n\
+					vec3 points[3];\n\
+					vec3 normals[3];\n\
+					vec3 faceNormal;\n\
+				};\n\
+				\n\
+				struct Geometry {	/* A bit messy, but it fits the data packing/fetching better */\n\
+					float trianglesIndex;\n\
+					float numTriangles;\n\
+					\n\
+					float reflect;\n\
+					float iOR;\n\
+				};\n\
+				\n\
+				struct Properties {\n\
+					vec3 diffuse;	/* If textureID is valid, multiply texel by diffuse, if not, just use diffuse */\n\
+					int textureID;\n\
+					\n\
+					vec3 ambient;\n\
+					float opacity;\n\
+					\n\
+					vec3 specular;\n\
+					float shine;\n\
+				};',
 
-			/* Functions for accessing the dataLists */
-			/* TODO: Bounds-checking? */
-			dataLists:
-				// Queries the mesh list texture at the index
-				'float getMeshID(float index) {\
-					return texture2D(dataLists, vec2(index, 0.0)).r;\
-				}\
-				\
-				// Maps the mesh triangles index to the triangles texture\
-				float getMeshTriangles(float index) {\
-					return texture2D(dataLists, vec2(index, 0.0)).g;\
-				}\
-				\
-				// Queries the triangle list texture at the index\
-				float getTriangleID(float index) {\
-					return texture2D(dataLists, vec2(index, 0.0)).b;\
+			util:
+				'float sum(vec3 v) { return v.x+v.y+v.z; }\n\
+				\n\
+				bool inRange(float t) { return (EPSILON <= t && t < infinity); }\n\
+				\n\
+				Ray transform(Ray ray, mat4 matrix) {\n\
+					return Ray(matrix*vec4(ray.origin, 1.0),\n\
+						matrix*vec4(ray.origin, 0.0),\n\
+						ray.hit, ray.light, ray.iOR, ray.tLight);\n\
 				}',
 
 			/* Functions for reading in data from the respective textures
 				and returning a useable object */
 			readData:
-				'Node getNode(float index) {\
-					vec4 data1 = texture2D(quadTree, vec2(index, nodePad));\
-					vec4 data2 = texture2D(quadTree, vec2(index, nodeStep+nodePad));\
-					\
-					return Node(AABBox(data1.xyz, data2.xyz),\
-						data1.w, data2.w));\
-				}\
-				\
-				/* Multiply the ray (in world space) by the inverse of the\
-					transformation matrix when testing for intersections,\
-					to reduce the number of multiplications - if there\'s a\
-					hit, move the point back into world space by multiplying\
-					it by the transformation matrix */\
-				mat4 getObjectMatrix(float index) {\
-					// Note: OpenGL matrices are column-major - weird, be careful\
-					return mat4(texture2D(objectMatrices, vec2(index, matColPad)),\
-						texture2D(objectMatrices, vec2(index, matColStep+matColPad)),\
-						texture2D(objectMatrices, vec2(index, 2.0*matColStep+matColPad)),\
-						texture2D(objectMatrices, vec2(index, 3.0*matColStep+matColPad)));\
-				}\
-				\
-				/* Normals must be handled as well, and must be\
-					multiplied by a normal matrix - the transpose of the\
-					inverse of the transformation matrix, with w = 0 (to\
-					remove translation) - so, do we send down normal matrices\
-					for each object too? - http://www.unknownroad.com/rtfm/graphics/rt_normals.html */\
-				mat4 getNormalMatrix(float index) {\
-					return mat4(texture2D(normalMatrices, vec2(index, matColPad)),\
-						texture2D(normalMatrices, vec2(index, matColStep+matColPad)),\
-						texture2D(normalMatrices, vec2(index, 2.0*matColStep+matColPad)),\
-						texture2D(normalMatrices, vec2(index, 3.0*matColStep+matColPad)));\
-				}\
-				\
-				Sphere getBoundingSphere(float index) {\
-					vec4 data = texture2D(boundingSpheres, vec2(index, 0.0));\
-					\
-					return Sphere(data.xyz, data.w);\
-				}\
-				\
-				Triangle getTriangle(float index) {\
-					Triangle t;\
-					\
-					t.points[0] = texture2D(triangles, vec2(index, triPointPad)).xyz;\
-					t.points[1] = texture2D(triangles, vec2(index, triPointStep+triPointPad)).xyz;\
-					t.points[2] = texture2D(triangles, vec2(index, 2.0*triPointStep+triPointPad)).xyz;\
-					\
-					/* Note that the normal is transformed by a different\
-						normal matrix - this is in eye space in THREE, so\
-						how do we get it down in world space?\
-						vec3 nWorld = mat3(objectMatrix[0].xyz, objectMatrix[1].xyz, objectMatrix[2].xyz)*normal;\
-						Does this hold up when scaling is involved though?\
-						http://www.lighthouse3d.com/tutorials/glsl-tutorial/the-normal-matrix/ */\
-					vec4 n0 = texture2D(triangles, vec2(index, 3.0*triPointStep+triPointPad));\
-					vec4 n1 = texture2D(triangles, vec2(index, 4.0*triPointStep+triPointPad));\
-					vec4 n2 = texture2D(triangles, vec2(index, 5.0*triPointStep+triPointPad));\
-					\
-					t.normals[0] = n0.xyz;\
-					t.normals[1] = n1.xyz;\
-					t.normals[2] = n2.xyz;\
-					\
-					t.faceNormal = vec3(n0.w, n1.w, n2.w);	/* Passing the face normal this way saves space */\
-					\
-					return t;\
-				}\
-				\
-				Properties getProperties(float index) {\
-					data1 = texture2D(properties, vec2(index, propsPad));\
-					data2 = texture2D(properties, vec2(index, propsStep+propsPad));\
-					\
-					return Properties(data1.r, data1.g, data1.b, data1.a,\
-						data2.rgb, data2.a,\
-						texture2D(properties, vec2(index, 2.0*propsStep+propsPad)),\
-						texture2D(properties, vec2(index, 3.0*propsStep+propsPad)));\
+				'Node getNode(float index) {\n\
+					float i = (index+PAD)/NUM_QUAD_TREE_NODES_F,\n\
+						j = NODE_PAD;\n\
+					\n\
+					vec4 pointers = texture2D(quadTree,\n\
+						vec2(i, j+2.0*NODE_STEP));\n\
+					\n\
+					return Node(AABBox(texture2D(quadTree, vec2(i, j)).xyz,\n\
+							texture2D(quadTree, vec2(i, j += NODE_STEP)).xyz),\n\
+						pointers.x, pointers.y, pointers.z, pointers.w));\n\
+				}\n\
+				\n\
+				Sphere getBoundingSphere(float index) {\n\
+					vec4 data = texture2D(meshes,\n\
+							vec2((index+PAD)/NUM_MESHES_F,\n\
+								BOUNDING_SPHERE_OFFSET+MESH_DATA_PAD));\n\
+					\n\
+					return Sphere(data.xyz, data.w);\n\
+				}\n\
+				\n\
+				mat4 getMatrix(float index, float offset) {\n\
+					float i = (index+PAD)/NUM_MESHES_F,\n\
+						j = offset+MESH_DATA_PAD;\n\
+					\n\
+					// Note: OpenGL matrices are column-major - weird, be careful\n\
+					return mat4(texture2D(meshes, vec2(i, j)),\n\
+						texture2D(meshes, vec2(i, j += MESH_DATA_STEP)),\n\
+						texture2D(meshes, vec2(i, j += MESH_DATA_STEP)),\n\
+						texture2D(meshes, vec2(i, j += MESH_DATA_STEP)));\n\
+				}\n\
+				\n\
+				/* Multiply the ray (in world space) by the inverse of the\n\
+					transformation matrix when testing for intersections,\n\
+					to reduce the number of multiplications - if there\'s a\n\
+					hit, move the point back into world space by multiplying\n\
+					it by the transformation matrix */\n\
+				mat4 getObjectMatrix(float index) {\n\
+					return getMatrix(index, OBJECT_MATRIX_OFFSET);\n\
+				}\n\
+				\n\
+				/* Normals must be handled as well, and must be\n\
+					multiplied by a normal matrix - the transpose of the\n\
+					inverse of the transformation matrix, with w = 0 (to\n\
+					remove translation) - so, do we send down normal matrices\n\
+					for each object too? - http://www.unknownroad.com/rtfm/graphics/rt_normals.html */\n\
+				mat4 getNormalMatrix(float index) {\n\
+					return getMatrix(index, NORMAL_MATRIX_OFFSET);\n\
+				}\n\
+				\n\
+				Geometry getGeometry(float index) {\n\
+					float i = (index+PAD)/NUM_MESHES_F,\n\
+						j = GEOMETRY_OFFSET+MESH_DATA_PAD;\n\
+					\n\
+					vec4 data = texture2D(properties, vec2(i, j));\n\
+					\n\
+					return Geometry(data.r, data.g, data.b, data.a);\n\
+				}\n\
+				\n\
+				Material getMaterial(float index) {\n\
+					float i = (index+PAD)/NUM_MESHES_F,\n\
+						j = MATERIAL_OFFSET+MESH_DATA_PAD;\n\
+					\n\
+					vec4 data[3];\n\
+					\n\
+					data[0] = texture2D(properties, vec2(i, j));\n\
+					data[1] = texture2D(properties, vec2(i, j += MESH_DATA_STEP));\n\
+					data[2] = texture2D(properties, vec2(i, j += MESH_DATA_STEP));\n\
+					\n\
+					return Material(data[0].rgb, data[0].a,\n\
+						data[1].rgb, data[1].a, data[2].rgb, data[2].a);\n\
+				}\n\
+				\n\
+				Triangle getTriangle(float index) {\n\
+					float i = (index+PAD)/NUM_TRIANGLES_F,\n\
+						j = TRI_POINT_PAD;\n\
+					Triangle t;\n\
+					\n\
+					t.points[0] = texture2D(triangles, vec2(i, j)).xyz;\n\
+					t.points[1] = texture2D(triangles,\n\
+							vec2(i, j += TRI_POINT_STEP)).xyz;\n\
+					t.points[2] = texture2D(triangles,\n\
+							vec2(i, j += TRI_POINT_STEP)).xyz;\n\
+					\n\
+					/* Note that the normal is transformed by a different\n\
+						normal matrix - this is in eye space in THREE, so\n\
+						how do we get it down in world space?\n\
+						vec3 nWorld = mat3(objectMatrix[0].xyz, objectMatrix[1].xyz, objectMatrix[2].xyz)*normal;\n\
+						Does this hold up when scaling is involved though?\n\
+						http://www.lighthouse3d.com/tutorials/glsl-tutorial/the-normal-matrix/ */\n\
+					vec4 n[3];\n\
+					\n\
+					n[0] = texture2D(triangles, i,\n\
+							vec2(i, j += TRI_POINT_STEP));\n\
+					n[1] = texture2D(triangles, i,\n\
+							vec2(i, j += TRI_POINT_STEP));\n\
+					n[2] = texture2D(triangles, i,\n\
+							vec2(i, j += TRI_POINT_STEP));\n\
+					\n\
+					t.normals[0] = n[0].xyz;\n\
+					t.normals[1] = n[1].xyz;\n\
+					t.normals[2] = n[2].xyz;\n\
+					\n\
+					t.faceNormal = vec3(n[0].w, n[1].w, n[2].w);	/* Passing the face normal this way saves space */\n\
+					\n\
+					return t;\n\
 				}',
 
 			/* The returned float (t) denotes the distance along
 				the ray at which the intersection occurs, where valid values
 				for t are in the range [epsilon, infinity], exclusively */
 			intersections:
-				'bool inRange(float t) { return (EPSILON <= t && t < infinity); }\
-				\
-				Ray transform(Ray ray, mat4 matrix) {\
-					return Ray(matrix*vec4(ray.origin, 1.0),\
-						matrix*vec4(ray.origin, 0.0),\
-						ray.hit, ray.light, ray.iOR, ray.tLight);\
-				}\
-				\
-				/* Kajiya et al\
-					http://code.google.com/p/rtrt-on-gpu/source/browse/trunk/Source/GLSL+Tutorial/Implicit+Surfaces/Fragment.glsl?r=305#147\
-					http://www.gamedev.net/topic/495636-raybox-collision-intersection-point/ */\
-				float intersection(Ray ray, AABBox box) {\
-					float t = -1.0;\
-					\
-					/* Cater for the special case where the ray originates\
-						inside the box - this must be handled explicitly */\
-					if(all(greaterThan(ray.origin, box.min)) &&\
-						all(lessThan(ray.origin, box.max))) { t = 0.0; }\
-					else {\
-						vec3 tmin = (box.min-ray.origin)/ray.dir;\
-						vec3 tmax = (box.max-ray.origin)/ray.dir;\
-						\
-						vec3 rmax = max(tmax, tmin);\
-						vec3 rmin = min(tmax, tmin);\
-						\
-						end = min(rmax.x, min(rmax.y, rmax.z));\
-						start = max(max(rmin.x, 0.0), max(rmin.y, rmin.z));\
-						\
-						if(end > start) { t = start; }\
-						//return final > start;\
-					}\
-					\
-					return t;\
-				}\
-				\
-				/* See "Intersecting a Sphere" at http://www.cs.unc.edu/~rademach/xroads-RT/RTarticle.html */\
-				float intersection(Ray ray, Sphere sphere) {\
-					vec3 oc = sphere.pos-ray.origin;\
-					float v = dot(oc, ray.dir);\
-					float dSq = s.rad*s.rad-(dot(oc, oc)-v*v);\
-					\
-					return ((dSq >= 0.0)? v-sqrt(dSq) : -1.0);\
-				}\
-				\
-				/* Ray-plane test */\
-				float intersection(Ray ray, vec3 point, vec3 normal) {\
-					float d = dot(ray.dir, normal);\
-					\
-					// Less than or equal to zero if parrallel or behind ray\
-					return ((abs(d) >= EPSILON)?\
-						dot(normal, (point-ray.origin))/d : -1.0);\
-				}\
-				\
-				/* Barycentric coordinate test - http://www.blackpawn.com/texts/pointinpoly/default.html */\
-				float intersection(Ray ray, Triangle triangle) {\
-					float t = intersection(ray, triangle.points[0],\
-						triangle.faceNormal);\
-					\
-					// Check if parrallel to or behind ray\
-					if(inRange(t)) {\
-						vec3 point = ray.origin+ray.dir*t;\
-						\
-						// Compute vectors\
-						vec3 v0 = triangle.points[2]-triangle.points[0];\
-						vec3 v1 = triangle.points[1]-triangle.points[0];\
-						vec3 v2 = point-triangle.points[0];\
-						\
-						// Compute dot products\
-						float dot00 = dot(v0, v0);\
-						float dot01 = dot(v0, v1);\
-						float dot02 = dot(v0, v2);\
-						float dot11 = dot(v1, v1);\
-						float dot12 = dot(v1, v2);\
-						\
-						// Compute barycentric coordinates\
-						float invDenom = 1/(dot00*dot11-dot01*dot01);\
-						float u = (dot11*dot02-dot01*dot12)*invDenom;\
-						float v = (dot00*dot12-dot01*dot02)*invDenom;\
-						\
-						// Check if point is in triangle\
-						if(u < 0.0 || v < 0.0 || u+v >= 1.0) { t = -1.0; }\
-					}\
-					\
-					return t;\
-				}\
-				\
-				float intersection(Ray ray, out float meshID, out Triangle triangle) {\
-					float closest = infinity;\
-					\
-					/* For the sake of optimisation, loops are extremely\
-						primitive in GLSL - only constant values may be used\
-						for the LCV, the test must be very simple, and everything\
-						seems to need to be figured out at compile time, not\
-						run time - hence, set up a budget of the maximum possible\
-						number of loops, and break early if not all are needed */\
-					float nodes[QUAD_TREE_NODES];\
-					nodes[0] = 0.0;\
-					int nLast = 0;\
-					\
-					/* Traverse quadTree */\
-					for(int n = 0; n < QUAD_TREE_NODES; ++n) {\
-						if(n > nLast) { break; }\
-						else {\
-							Node node = getNode(nodes[n]);\
-							\
-							if(node.subNodesIndex >= 0.0 || node.meshesIndex >= 0.0) {	/* Check if empty before checking intersection */\
-								if(inRange(intersection(ray, node.bounds))) {\
-									if(node.subNodesIndex >= 0.0) {\
-										for(float i = 0.0; i < 4.0*quadTreeStep; i += quadTreeStep) {\
-											nodes[++nLast] = node.subNodesIndex+i;\
-										}\
-									}\
-									\
-									if(node.meshesIndex >= 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\
-										float mID;\
-										Triangle tri;\
-										float mT = intersection(ray,\
-													node.meshesIndex, mID, tri);\
-										\
-										if(mT < closest) {\
-											closest = mT;\
-											triangle = tri;\
-											meshID = mID;\
-										}\
-									}\
-								}\
-							}\
-						}\
-					}\
-					\
-					return closest;\
-				}\
-				\
-				float intersection(Ray ray, float meshesIndex,\
-					out float meshID, out Triangle triangle) {\
-					float closest = infinity, mn = meshesIndex;\
-					\
-					for(float m = 0.0; m < 1.0; m += dataListStep) {\
-						float mID = getMeshID(mn);\
-						\
-						if(mID < 0.0) { break; }	/* Check for end of list */\
-						else if(inRange(intersection(ray, getBoundingSphere(meshID)))) {	/* Check mesh bounding radii */\
-							/* Check mesh triangles */\
-							float tn = getMeshTriangles(mn));\
-							\
-							for(float t = 0.0; t < 1.0; t += dataListStep) {\
-								if(tn < 0.0) { break; }	/* Check for end of list */\
-								else {\
-									Triangle tri = getTriangle(tn);\
-									float tT = intersection(transform(ray, /* TODO */), tri);\
-									\
-									if(inRange(tT) && tT < closest) {\
-										closest = tT;\
-										triangle = tri;\
-										meshID = mID;\
-									}\
-									\
-									tn += dataListStep;\
-								}\
-							}\
-							\
-							mn += dataListStep;\
-						}\
-					}\
-					\
-					return closest;\
+				'/* Kajiya et al\n\
+					http://code.google.com/p/rtrt-on-gpu/source/browse/trunk/Source/GLSL+Tutorial/Implicit+Surfaces/Fragment.glsl?r=305#147\n\
+					http://www.gamedev.net/topic/495636-raybox-collision-intersection-point/ */\n\
+				float intersection(Ray ray, AABBox box) {\n\
+					float t = -1.0;\n\
+					\n\
+					/* Cater for the special case where the ray originates\n\
+						inside the box - this must be handled explicitly */\n\
+					if(all(greaterThan(ray.origin, box.min)) &&\n\
+						all(lessThan(ray.origin, box.max))) { t = 0.0; }\n\
+					else {\n\
+						vec3 tmin = (box.min-ray.origin)/ray.dir;\n\
+						vec3 tmax = (box.max-ray.origin)/ray.dir;\n\
+						\n\
+						vec3 rmax = max(tmax, tmin);\n\
+						vec3 rmin = min(tmax, tmin);\n\
+						\n\
+						end = min(rmax.x, min(rmax.y, rmax.z));\n\
+						start = max(max(rmin.x, 0.0), max(rmin.y, rmin.z));\n\
+						\n\
+						if(end > start) { t = start; }\n\
+						//return final > start;\n\
+					}\n\
+					\n\
+					return t;\n\
+				}\n\
+				\n\
+				/* See "Intersecting a Sphere" at http://www.cs.unc.edu/~rademach/xroads-RT/RTarticle.html */\n\
+				float intersection(Ray ray, Sphere sphere) {\n\
+					vec3 oc = sphere.pos-ray.origin;\n\
+					float v = dot(oc, ray.dir);\n\
+					float dSq = s.rad*s.rad-(dot(oc, oc)-v*v);\n\
+					\n\
+					return ((dSq >= 0.0)? v-sqrt(dSq) : -1.0);\n\
+				}\n\
+				\n\
+				/* Ray-plane test */\n\
+				float intersection(Ray ray, vec3 point, vec3 normal) {\n\
+					float d = dot(ray.dir, normal);\n\
+					\n\
+					// Less than or equal to zero if parrallel or behind ray\n\
+					return ((abs(d) >= EPSILON)?\n\
+						dot(normal, (point-ray.origin))/d : -1.0);\n\
+				}\n\
+				\n\
+				/* Barycentric coordinate test - http://www.blackpawn.com/texts/pointinpoly/default.html */\n\
+				float intersection(Ray ray, Triangle triangle) {\n\
+					/* TODO: transform ray, transform hit point back */\n\
+					\n\
+					float t = intersection(ray, triangle.points[0],\n\
+						triangle.faceNormal);\n\
+					\n\
+					// Check if parrallel to or behind ray\n\
+					if(inRange(t)) {\n\
+						vec3 point = ray.origin+ray.dir*t;\n\
+						\n\
+						// Compute vectors\n\
+						vec3 v0 = triangle.points[2]-triangle.points[0];\n\
+						vec3 v1 = triangle.points[1]-triangle.points[0];\n\
+						vec3 v2 = point-triangle.points[0];\n\
+						\n\
+						// Compute dot products\n\
+						float dot00 = dot(v0, v0);\n\
+						float dot01 = dot(v0, v1);\n\
+						float dot02 = dot(v0, v2);\n\
+						float dot11 = dot(v1, v1);\n\
+						float dot12 = dot(v1, v2);\n\
+						\n\
+						// Compute barycentric coordinates\n\
+						float invDenom = 1/(dot00*dot11-dot01*dot01);\n\
+						float u = (dot11*dot02-dot01*dot12)*invDenom;\n\
+						float v = (dot00*dot12-dot01*dot02)*invDenom;\n\
+						\n\
+						// Check if point is in triangle\n\
+						if(u < 0.0 || v < 0.0 || u+v >= 1.0) { t = -1.0; }\n\
+					}\n\
+					\n\
+					return t;\n\
+				}\n\
+				\n\
+				float intersection(Ray ray, out float meshID, out Triangle triangle) {\n\
+					float closest = infinity;\n\
+					\n\
+					/* For the sake of optimisation, loops are extremely\n\
+						primitive in GLSL - only constant values may be used\n\
+						for the LCV, the test must be very simple, and everything\n\
+						seems to need to be figured out at compile time, not\n\
+						run time - hence, set up a budget of the maximum possible\n\
+						number of loops, and break early if not all are needed */\n\
+					float nodes[NUM_QUAD_TREE_NODES];\n\
+					nodes[0] = 0.0;\n\
+					int nLast = 0;\n\
+					\n\
+					/* Traverse quadTree */\n\
+					for(int n = 0; n < NUM_QUAD_TREE_NODES; ++n) {\n\
+						if(n <= nLast) {\n\
+							Node node = getNode(nodes[n]);\n\
+							\n\
+							if(node.numSubNodes > 0.0 || node.numMeshes > 0.0) {	/* Check if empty before checking intersection */\n\
+								if(inRange(intersection(ray, node.bounds))) {\n\
+									if(node.numSubNodes > 0.0) {\n\
+										for(float i = 0.0; i < 4.0; ++i) {\n\
+											nodes[++nLast] = node.subNodesIndex+i;\n\
+										}\n\
+									}\n\
+									\n\
+									if(node.numMeshes > 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\n\
+										float mID;\n\
+										Triangle tri;\n\
+										float mT = intersection(ray, node.meshesIndex,\n\
+												node.numMeshes, mID, tri);\n\
+										\n\
+										if(mT < closest) {\n\
+											closest = mT;\n\
+											triangle = tri;\n\
+											meshID = mID;\n\
+										}\n\
+									}\n\
+								}\n\
+							}\n\
+						}\n\
+						else { break; }\n\
+					}\n\
+					\n\
+					return closest;\n\
+				}\n\
+				\n\
+				float intersection(Ray ray, float meshesIndex, float numMeshes,\n\
+					out float meshID, out Triangle triangle) {\n\
+					float closest = infinity;\n\
+					float mID = meshesIndex;\n\
+					\n\
+					for(float m = 0.0; m < NUM_MESHES_F; ++m) {\n\
+						if(m >= numMeshes) { break; }	/* Check for end of list */\n\
+						else if(inRange(intersection(ray, getBoundingSphere(mID)))) {	/* Check mesh bounding radii */\n\
+							/* Check mesh triangles */\n\
+							Geometry geometry = getGeometry(mID);\n\
+							float tn = geometry.trianglesIndex;\n\
+							\n\
+							for(float t = 0.0; t < NUM_TRIANGLES_F; ++t) {\n\
+								if(t < geometry.numTriangles) {	/* Check for end of list */\n\
+									Triangle tri = getTriangle(tn);\n\
+									float tT = intersection(ray, tri);\n\
+									\n\
+									if(EPSILON <= tT && tT < closest) {\n\
+										closest = tT;\n\
+										triangle = tri;\n\
+										meshID = mID;\n\
+									}\n\
+									\n\
+									++tn;\n\
+								}\n\
+								else { break; }\n\
+							}\n\
+							\n\
+							++mID;\n\
+						}\n\
+					}\n\
+					\n\
+					return closest;\n\
 				}',
 
 			/* Given an initial ray, traces rays around the
@@ -2304,174 +2439,186 @@
 				(maintaining recursive heirarchical order),
 				and returns the accumulated color of the fragment */
 			whittedRayTracer:
-				'float sum(vec3 v) { return v.x+v.y+v.z; }\
-				\
-				vec3 traceRays(Ray eyeRay) {\
-					vec3 accColor;\
-					\
-					Ray rays[MAX_RAYS];\
-					\
-					/* TODO: figure out if the eye ray needs to be traced,\
-						or if nothing is between the fragment and the\
-						camera, since it is being drawn */\
-					rays[0] = eyeRay;\
-					\
-					/* rLast - for reducing the number of loops\
-						When spawning rays, add them to rays after this\
-						and increase it by the number of added rays\
-						If r exceeds this, break (no more valid rays to be\
-						traced) */\
-					int rLast = 0, hits = 0;\
-					\
-					for(int r = 0; r < MAX_RAYS; ++r) {\
-						if(r > rLast) { break; }\
-						else {\
-							Ray ray = rays[r];\
-							float meshID;\
-							Triangle triangle;\
-							float t = intersection(ray, meshID, triangle);\
-							\
-							vec3 hitPoint = ray.origin+ray.dir*t;\
-							Properties props = getProperties(meshID);\
-							\
-							/* Calculate color from closest intersection */\
-							if(EPSILON <= ray.tLight &&	/* Shadow ray */\
-								(ray.tLight <= t || t < EPSILON)) {	/* Light closer or no hit */\
-								/* Final color accumulation - direct light */\
-								accColor += ray.light;\
-							}\
-							else if(inRange(t) && ray.hit < MAX_HITS) {\
-								/* Cast shadow, reflection, and\
-									refraction rays, if the energy is\
-									over the threshold */\
-								int hit = ray.hit+1;\
-								\
-								/* TODO: get smooth normal - dots \'n\' mixes */\
-								vec3 hitNormal = triangle.faceNormal;\
-								\
-								/* Set iOR according to whether leaving or\
-									entering material */\
-								if(dot(ray.dir, hitNormal) >= 0.0) {\
-									props.iOR = mediumIOR;\
-								}\
-								\
-								// Shadow\
-								vec3 shLight = props.ambient*props.diffuse*\
-										props.specular*props.opacity*ray.light;\
-								\
-								if(sum(shLight) > 0.0) {\
-									/* Get the hitPoint color */\
-									/* Branching is slow - only do it there\'s a\
-										significant chunk of code inside */\
-									vec3 ambient = ambientLightColor*props.ambient;\
-									\
-									#if MAX_POINT_LIGHTS > 0\
-										/* TODO: take jittered samples for soft shadows? */\
-										for(int l = 0; l < MAX_POINT_LIGHTS; ++l) {\
-											/* Compute the phong shading at the hitPoint */\
-											vec3 rayColor = ambient;\
-											vec3 toLight = pointLightPosition[l]-hitPoint;\
-											float dist = length(toLight);\
-											toLight /= dist;\
-											\
-											vec3 diffuse = props.diffuse*\
-													pointLightColor[l]*\
-													max(dot(hitNormal, toLight), 0.0);\
-											/* TODO: texturing *//*\
-											if(props.textureID >= 0) {\
-												vec4 texel = texture2D(textures[props.textureID],\
-													getTextureCoord(meshID, hitPoint));\
-												\
-												diffuse *= texel.rgb*texel.a;\
-											}*/\
-											\
-											rayColor += diffuse;\
-											\
-											if(sum(props.specular) > 0.0) {\
-												float reflection = reflect(toLight, hitNormal);\
-												float highlight = max(dot(reflection, ray.dir), 0.0);\
-												vec3 specular = props.specular*\
-														pointLightColor[l]*\
-														pow(highlight, props.shine);\
-												\
-												rayColor += specular;\
-											}\
-											\
-											rayColor *= props.opacity;\
-											\
-											if(sum(rayColor) > 0.0) {	/* Don\'t bother casting if it\'s just black anyway  */\
-												/* If falloff distance, determine attenuation\
-													http://imdoingitwrong.wordpress.com/2011/02/10/improved-light-attenuation/ */\
-												vec3 fromLight = -toLight;\
-												float attenuation = 1.0;\
-												float lightRange = pointLightDistance[l];\
-												\
-												if(lightRange > 0.0) {\
-													float distFactor = dist/\
-															(1-pow(dist/lightRange, 2.0));\
-													\
-													attenuation = 1.0/pow(distFactor+1.0, 2.0);\
-												}\
-												\
-												float lightCosAngle = spotLightCosAngle[l];\
-												\
-												/* If spotlight, determine if within spotlight cone */\
-												if(attenuation > 0.0 &&\
-													-1.0 < lightCosAngle && lightCosAngle < 1.0) {	/* In the range [0-180], exclusive - should it be [0, 1]->[90, 0]? (see attenuation with spot falloff) */\
-													/* http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/\
-														http://dl.dropbox.com/u/2022279/OpenGL%20ES%202.0%20Programming%20Guide.pdf */\
-													float cosAngle = dot(fromLight,\
-														spotLightDirection[l]);\
-													\
-													attenuation *= ((lightCosAngle <= cosAngle)?\
-														pow(cosAngle, spotLightFalloff[l]) : 0.0);\
-												}\
-												\
-												rayColor *= attenuation;\
-												\
-												if(attenuation > 0.0) {\
-													rays[++rLast] = Ray(hitPoint,\
-														-fromLight, hit,\
-														shLight*rayColor,\
-														props.iOR, dist);\
-												}\
-											}\
-										}\
-									#else\
-										accColor += shLight*ambient*props.opacity;\
-									#endif\
-								}\
-								\
-								// Reflection\
-								vec3 rflLight = props.reflect*props.opacity*ray.light;\
-								if(sum(rflLight) > 0.0) {\
-									rays[++rLast] = Ray(hitPoint,\
-										reflect(ray.dir, hitNormal), hit\
-										rflLight, props.iOR, -1.0);\
-								}\
-								\
-								// Refraction\
-								vec3 rfrLight = (1.0-props.opacity)*ray.light;\
-								if(sum(rfrLight) > 0.0) {\
-									rays[++rLast] = Ray(hitPoint,\
-										refract(ray.dir, hitNormal,\
-											ray.props.iOR/props.iOR),\
-										hit, rfrLight, props.iOR, -1.0);\
-								}\
-							}\
-						}\
-					}\
-					\
-					return accColor;\
+				'vec3 traceRays(Ray eyeRay) {\n\
+					vec3 accColor;\n\
+					\n\
+					Ray rays[MAX_RAYS];\n\
+					\n\
+					/* TODO: figure out if the eye ray needs to be traced,\n\
+						or if nothing is between the fragment and the\n\
+						camera, since it is being drawn */\n\
+					rays[0] = eyeRay;\n\
+					\n\
+					/* rLast - for reducing the number of loops\n\
+						When spawning rays, add them to rays after this\n\
+						and increase it by the number of added rays\n\
+						If r exceeds this, break (no more valid rays to be\n\
+						traced) */\n\
+					int rLast = 0;\n\
+					\n\
+					for(int r = 0; r < MAX_RAYS; ++r) {\n\
+						if(r <= rLast) {\n\
+							Ray ray = rays[r];\n\
+							float meshID;\n\
+							Triangle triangle;\n\
+							float t = intersection(ray, meshID, triangle);\n\
+							\n\
+							/* Calculate color from closest intersection */\n\
+							if(EPSILON <= ray.tLight &&	/* Shadow ray */\n\
+								(ray.tLight <= t || t < EPSILON)) {	/* Light closer or no hit */\n\
+								/* Final color accumulation - direct light */\n\
+								accColor += ray.light;\n\
+							}\n\
+							else if(inRange(t) && ray.hit < MAX_HITS) {\n\
+								/* Cast shadow, reflection, and\n\
+									refraction rays, if the energy is\n\
+									over the threshold */\n\
+								int hit = ray.hit+1;\n\
+								vec3 hitPoint = ray.origin+ray.dir*t;\n\
+								/* TODO: get smooth normal - dots \'n\' mixes */\n\
+								vec3 hitNormal = triangle.faceNormal;\n\
+								Geometry geo = getGeometry(meshID);\n\
+								Material mat = getMaterial(meshID);\n\
+								\n\
+								/* Set iOR according to whether leaving or\n\
+									entering material */\n\
+								if(dot(ray.dir, hitNormal) >= 0.0) {\n\
+									geo.iOR = MEDIUM_IOR;\n\
+								}\n\
+								\n\
+								// Shadow\n\
+								vec3 shLight = mat.opacity*ray.light*\n\
+										(mat.ambient+mat.diffuse+\n\
+										mat.specular);\n\
+								\n\
+								if(sum(shLight) > 0.0) {\n\
+									/* Get the hitPoint color */\n\
+									/* Branching is slow - only do it there\'s a\n\
+										significant chunk of code inside */\n\
+									vec3 ambient = ambientLightColor*mat.ambient;\n\
+									\n\
+									#if MAX_POINT_LIGHTS > 0\n\
+										for(int l = 0; l < MAX_POINT_LIGHTS; ++l) {\n\
+											vec3 lightColor = pointLightColor[l];\n\
+											\n\
+											if(sum(lightColor) > 0.0) {\n\
+												vec3 toLight = pointLightPosition[l]-hitPoint;\n\
+												float dist = length(toLight);\n\
+												\n\
+												toLight /= dist;\n\
+												\n\
+												vec3 fromLight = -toLight;\n\
+												\n\
+												/* If falloff distance, determine attenuation\n\
+													http://imdoingitwrong.wordpress.com/2011/02/10/improved-light-attenuation/ */\n\
+												float attenuation = 1.0,\n\
+													lightRange = pointLightDistance[l];\n\
+												\n\
+												if(lightRange > 0.0) {\n\
+													float distFactor = dist/\n\
+															(1-pow(dist/lightRange, 2.0));\n\
+													\n\
+													attenuation = 1.0/pow(distFactor+1.0, 2.0);\n\
+												}\n\
+												\n\
+												float lightCosAngle = spotLightCosAngle[l];\n\
+												\n\
+												/* If spot light, determine if within spot light cone */\n\
+												if(attenuation > 0.0 &&\n\
+													-1.0 < lightCosAngle && lightCosAngle < 1.0) {	/* In the range [0-180], exclusive - should it be [0, 1]->[90, 0]? (see attenuation with spot falloff) */\n\
+													float cosAngle = dot(fromLight,\n\
+														spotLightDirection[l]);\n\
+													\n\
+													attenuation *= ((lightCosAngle <= cosAngle)?\n\
+														/* Which will result in proper attenuation?\n\
+															http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/\n\
+															http://dl.dropbox.com/u/2022279/OpenGL%20ES%202.0%20Programming%20Guide.pdf */\n\
+														pow(cosAngle, spotLightFalloff[l]) : 0.0);\n\
+														//pow((cosAngle+1.0)*0.5, spotLightFalloff[l]) : 0.0);\n\
+												}\n\
+												\n\
+												if(attenuation > 0.0) {	/* Don\'t bother calculating color or casting if outside of light range */\n\
+													/* Compute the phong shading at the hitPoint\n\
+														Ambient is only accumulated once, so do\n\
+														that outside this loop */\n\
+													vec3 rayColor;\n\
+													\n\
+													vec3 diffuse = mat.diffuse*lightColor*\n\
+															max(dot(hitNormal, toLight), 0.0);\n\
+													\n\
+													/* TODO: texturing *//*\n\
+													if(mat.textureID >= 0) {\n\
+														vec4 texel = texture2D(textures[mat.textureID],\n\
+															getTextureCoord(meshID, hitPoint));\n\
+														\n\
+														diffuse *= texel.rgb*texel.a;\n\
+													}*/\n\
+													\n\
+													rayColor += diffuse;\n\
+													\n\
+													if(sum(mat.specular) > 0.0) {\n\
+														float reflection = reflect(toLight, hitNormal);\n\
+														float highlight = max(dot(reflection, ray.dir), 0.0);\n\
+														vec3 specular = mat.specular*lightColor*\n\
+																pow(highlight, mat.shine);\n\
+														\n\
+														rayColor += specular;\n\
+													}\n\
+													\n\
+													rayColor *= mat.opacity;\n\
+													\n\
+													if(sum(rayColor) > 0.0) {	/* Don\'t bother casting if it\'s just black anyway  */\n\
+														/* TODO: take jittered samples for soft shadows? */\n\
+														rays[++rLast] = Ray(hitPoint,\n\
+															toLight, hit,\n\
+															shLight*rayColor*attenuation,\n\
+															geo.iOR, dist);\n\
+													}\n\
+												}\n\
+											}\n\
+										}\n\
+									#endif\n\
+									\n\
+									accColor += shLight*ambient*mat.opacity;\n\
+								}\n\
+								\n\
+								// Reflection\n\
+								vec3 rflLight = geo.reflect*mat.opacity*ray.light;\n\
+								if(sum(rflLight) > 0.0) {\n\
+									rays[++rLast] = Ray(hitPoint,\n\
+										reflect(ray.dir, hitNormal), hit\n\
+										rflLight, geo.iOR, -1.0);\n\
+								}\n\
+								\n\
+								// Refraction\n\
+								vec3 rfrLight = (1.0-mat.opacity)*ray.light;\n\
+								if(sum(rfrLight) > 0.0) {\n\
+									rays[++rLast] = Ray(hitPoint,\n\
+										refract(ray.dir, hitNormal,\n\
+											ray.iOR/geo.iOR),\n\
+										hit, rfrLight, geo.iOR, -1.0);\n\
+								}\n\
+							}\n\
+						}\n\
+						else { break; }\n\
+					}\n\
+					\n\
+					return accColor;\n\
 				}',
 
 			fragmentMain:
-				'void main() {\
-					gl_FragColor = vec4(traceRays(Ray(cameraPosition,\
-							normalize(pos.xyz-cameraPosition),\
-							1.0, mediumIOR, -1)), 1.0);'+
+				'void main() {\n\
+					gl_FragColor = vec4(traceRays(Ray(cameraPosition,\n\
+							normalize(pos.xyz-cameraPosition),\n\
+							0, 1.0, MEDIUM_IOR, -1.0)), 1.0);'+
 
 					THREE.ShaderChunk["fog_fragment"]+
+					/* TODO: alter traceRays to write the meshID of the
+						first intersection into a variable, which can then
+						be assigned to the alpha part of the fragment color
+						This could then be read back on the CPU
+						Finally, the FBO texture could be rendered out to
+						the screen with all alpha set to 1.0 in a post pass */
 				'}'
 		});
 //	}
@@ -2553,7 +2700,7 @@
 						wireframe: true })) });
 			
 			settings.light.pos = this.pos;
-			//this.light = new Spotlight(settings.light);
+			//this.light = new SpotLight(settings.light);
 			
 			this.inputForce = null;
 
@@ -2718,11 +2865,6 @@
 				this when the respective lumens dimension is larger */
 			this.boundRect = new AARect();
 
-			this.walls = new QuadTree(this.boundRect.copy(), 5, 4,
-					settings.walls, function(wall) { return wall.treeItem; });
-
-			this.shapes = new QuadTree(this.boundRect.copy(), 5, 8);
-
 			this.springForce = settings.springForce;
 			this.zoomSpringForce = settings.zoomSpringForce;
 			this.zoomSpringForce.restLength = settings.camera.position.z;
@@ -2731,10 +2873,6 @@
 
 			this.restitution = (settings.restitution || 0.75);
 			
-			// TODO: change all to trees
-			this.lights = (settings.lights || []);
-			this.glows = (settings.glows || []);
-
 			this.debug = $.extend(true, {
 				bounds: false,
 				trails: false,
@@ -2867,8 +3005,6 @@
 					for(var e = 0; e < entity.length; ++e) { this.add(entity[e]); }
 				}
 				else {
-					var shapeTreeItem = entity.shape.treeItem;
-
 					this.scene.add(entity.shape.three);
 
 					if(entity.light) { this.scene.add(entity.light.three); }
@@ -3289,7 +3425,8 @@
 				}
 
 				/* TODO: call THREE.GeometryUtils.merge() to improve
-					rendering performance for the static walls */
+					rendering performance for the static walls - need
+					to change collision code to deal with "one" wall */
 
 				return walls;
 			},
@@ -3304,12 +3441,18 @@
 						new THREE.Vector3(point.x, point.y, 0)));
 				}
 
-				return new Shape({
-					three: new THREE.Line(geometry,
+				var line = new THREE.Line(geometry,
 						new THREE.LineBasicMaterial({ color: 0xffffff,
 							opacity: 1, linewidth: 3 })),
-					owner: new Particle({ pos: new Vec2D().copy(JSON.position) })
-				});
+					shape = new Shape({
+							three: line,
+							owner: new Particle({ pos: new Vec2D().copy(JSON.position) })
+						});
+
+				line.matrixAutoUpdate = false;
+				line.updateMatrix();
+
+				return shape;
 			}
 		};
 //	}
@@ -3331,7 +3474,7 @@
 			this.player = new Firefly({ pos: this.boundRect.size.scale(0.5) });
 
 			this.viewport = new Viewport($.extend({
-				springForce: { posTo: this.player.pos }, walls: this.walls.source,
+				springForce: { posTo: this.player.pos },
 				lumens: this, pos: this.player.pos.copy() }, settings.viewport));
 			
 
