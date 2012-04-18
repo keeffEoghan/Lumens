@@ -313,18 +313,22 @@
 		}
 		$.extend(QuadTree.prototype, {
 			add: function(source) {
-				this.source = this.source.concat(source); return this;
+				if(source) { this.source = this.source.concat(source); }
+				return this;
 			},
 			put: function(item, converter) {
-				if(converter) {
-					if($.isArray(item)) {
-						for(var i = 0; i < item.length; ++i) {
-							this.put(item[i], converter);
+				if(!$.isFunction(item)) {
+					if(converter) {
+						if($.isArray(item)) {
+							for(var i = 0; i < item.length; ++i) {
+								this.put(item[i], converter);
+							}
 						}
+						else { this.root.put(converter.call(null, item)); }
 					}
-					else { this.root.put(converter.call(null, item)); }
+					else { this.root.put(item); }
 				}
-				else { this.root.put(item); }
+				else { this.put(this.source, item); }
 				
 				return this;
 			},
@@ -336,6 +340,21 @@
 				}
 
 				this.root.clear(item);
+				return this;
+			},
+			remove: function(item) {
+				if(item) {
+					if($.isArray(item)) {
+						for(var i = 0; i < item.length; ++i) {
+							this.remove(item[i]);
+						}
+					}
+					else {
+						this.source.splice(this.source.indexOf(item), 1);
+					}
+				}
+				else { this.source.length = 0; }
+
 				return this;
 			}
 			/* TODO: implement a function to return a GLSL string
@@ -700,11 +719,14 @@
 //	}
 	
 //	PHYSICS {
+		function Point(pos) { this.pos = pos || new Vec2D(); }
+
 		/* See Game Physics Engine Development, by Ian Millington */
 		function Particle(options) {
 			if(!options) { options = {}; }
 			
-			this.pos = (options.pos || new Vec2D());
+			Point.call(this, options.pos);
+
 			this.vel = (options.vel || new Vec2D());
 			this.acc = (options.acc || new Vec2D());
 			this.force = (options.force || new Vec2D());
@@ -721,7 +743,7 @@
 			this.trailLimit = (($.isNumeric(options.trailLimit))?
 				options.trailLimit : 5);
 		}
-		$.extend(Particle.prototype, {
+		$.extend(inherit(Particle, Point).prototype, {
 			resolve: function(dt) {
 				if(dt) {
 					this.updateTrail();
@@ -1037,12 +1059,13 @@
 					// TODO: optimisations and fine collision detection
 					var collision = new Collision(shape, other);
 
-					if(other.boundRad.intersects(shape.boundRad)) {
-						var verts = other.three.geometry.vertices;
+					if(other.shape.boundRad.intersects(shape.boundRad)) {
+						var w = other.shape,
+							verts = w.three.geometry.vertices;
 						
 						for(var v = 0; v < verts.length; ++v) {
-							var a = other.globPos(verts.wrap(v-1).position),
-								b = other.globPos(verts[v].position),
+							var a = w.globPos(verts.wrap(v-1).position),
+								b = w.globPos(verts[v].position),
 								c = Collision.Circle.checkLine(shape.boundRad,
 										a, b);
 
@@ -1462,7 +1485,7 @@
 			/* A bit different to the others, in that it doesn't return a force to
 				be applied to each point in turn, but rather applies it across
 				all of the points in turn */
-			applyPressure: function(points, factor) {
+			applyPressure: function(points, density) {
 				// Derived used to prevent repeated calculations
 				var volume = 0, derived = [];
 
@@ -1483,7 +1506,7 @@
 				var invVolume = 1/volume;
 				for(var d = 0; d < derived.length; ++d) {
 					var data = derived[d],
-						pressure = invVolume*factor*data.mag;
+						pressure = invVolume*density*data.mag;
 					
 					data.from.force.doAdd(data.normal.scale(pressure));
 					data.to.force.doAdd(data.normal.scale(pressure));
@@ -1584,16 +1607,13 @@
 
 		// No orientation - just position (bound to particle)
 		function Shape(options) {
-			if(!options) { options = {}; }
+			var settings = $.extend(true, {}, Shape.settings, options);
 			
-			this.owner = (options.owner || new Particle());
+			this.owner = (options.owner || new Point());
 
 			this.three = options.three;	//  THREE.Mesh
 
-			this.properties = {
-				geometry: {},
-				material: {}
-			};
+			this.material = settings.material;
 
 			this.boundRad = new Circle();
 			this.treeItem = null;
@@ -1660,6 +1680,11 @@
 				return new THREE.Vector3().add(relPosition, this.three.position);
 			}
 		});
+		Shape.settings = {
+			material: { reflect: 0.5, iOR: 1.3, density: 10, opacity: 0.5,
+				ambient: new THREE.Color(0x000000),
+				diffuse: new THREE.Color(0x5555bb), textureID: -1,
+				specular: new THREE.Color(0x000000), shine: 1 } };
 //	}
 
 //	LIGHT {
@@ -1720,23 +1745,15 @@
 		function RayTracer(options) {
 			if(!options) { options = {}; }
 
-			/* Require OES_texture_float? *//*
-			if(!gl.getExtension("OES_texture_float")) {
-				throw("Requires OES_texture_float extension");
-			}
-			*/
-
-			this.scene = options.scene;
-			this.meshTree = options.meshTree;
-			this.maxHits = options.maxHits;
-
-			this.maxRays = this.numQuadTreeNodes =
-				this.numMeshes = this.numTriangles = 0;
-
+			// Note: float texture values go from [-inf, +inf], they are NOT normalised to [0, 1] - http://stackoverflow.com/questions/5709023/what-exactly-is-a-floating-point-texture
 			this.uniforms = THREE.UniformsUtils.merge([
 				THREE.UniformsLib["fog"],
 				{
 					ambientLightColor: { type: 'fv', value: [] },
+
+					directionalLightColor: { type: 'fv', value: [] },
+					directionalLightDirection: { type: 'fv', value: [] },
+
 					pointLightColor: { type: 'fv', value: [] },
 					pointLightPosition: { type: 'fv', value: [] },
 					pointLightDistance: { type: 'fv1', value: [] },
@@ -1758,13 +1775,16 @@
 							undefined, undefined, undefined,
 							THREE.NearestFilter, THREE.NearestFilter) },*/
 
-					/* M*(13*RGBA - [x, y, z, radius]
+					/* M*(3*RGB+14*RGBA - [boundRadius, trianglesIndex, numTriangles]
 
 							[c0r0, c0r1, c0r2, c0r3][c1r0, c1r1, c1r2, c1r3][c2r0, c2r1, c2r2, c2r3][c3r0, c3r1, c3r2, c3r3]
 							[c0r0, c0r1, c0r2, c0r3][c1r0, c1r1, c1r2, c1r3][c2r0, c2r1, c2r2, c2r3][c3r0, c3r1, c3r2, c3r3]
+							[c0r0, c0r1, c0r2, c0r3][c1r0, c1r1, c1r2, c1r3][c2r0, c2r1, c2r2, c2r3][c3r0, c3r1, c3r2, c3r3]
 
-							[trianglesIndex, numTriangles, reflect, iOR][rdiff, gdiff, bdiff, textureID]
-							[ramb, gamb, bamb, opacity][rspec, gspec, bspec, shine] */
+							[reflect, iOR, density, opacity]
+							[ramb, gamb, bamb]
+							[rdiff, gdiff, bdiff, textureID]
+							[rspec, gspec, bspec, shine] */
 					meshes: { type: 't', value: 1,
 						texture: new THREE.DataTexture([], 0, 0,
 							THREE.RGBAFormat, THREE.FloatType,
@@ -1789,77 +1809,104 @@
 							undefined, undefined, undefined,
 							THREE.NearestFilter, THREE.NearestFilter) },*/
 
-					infinity: { type: 'f', value: 10000 }
+					infinity: { type: 'f', value: (options.infinity || 10000) },
+					numQuadTreeNodes: { type: 'f', value: 0 },
+					numMeshes: { type: 'f', value: 0 },
+					numTriangles: { type: 'f', value: 0 },
+					maxHits: { type: 'i', value: 0 },
+					maxRays: { type: 'i', value: 0 }
 				}]);
 
-			this.fragment = '';
-
 			this.material = new THREE.ShaderMaterial({
-				fragmentShader: this.fragment,
-				vertexShader: this.vertex,
-				uniforms: this.uniforms,
-				lights: true,
-				fog: true
+				fragmentShader: '', vertexShader: this.vertex,
+				uniforms: this.uniforms, lights: true, fog: true
 			});
 
-			this.update().setup();
+			this.scene = options.scene;
+			this.entities = options.entities;
+
+			var b = options.budgets;
+			this.budgets = {
+				autoSetup: false,
+				growth: 1.5,
+
+				lights: this.scene.lights.length,
+				meshes: (($.isNumeric(b.meshes))?
+					b.meshes : this.entities.source.length),
+				triangles: (($.isNumeric(b.triangles))?
+					b.triangles : 100*b.meshes),
+				hit: 0, ray: 0, quadTree: 0
+			};
+
+			this.setQuadTreeBudget(($.isNumeric(b.quadTreeDepth))?
+					b.quadTreeDepth : this.entities.root.maxDepth)
+				.setHitBudget(options.budgets.hit || 3)
+				.setHitMax(options.maxHits || 3)
+				.update().setup();
+
+			this.budgets.autoSetup = !!options.autoSetupBudgets;
 		}
 		$.extend(RayTracer.prototype, {
 			setup: function() {
-				this.maxRays = 1;
+				var b = this.budgets;
 
-				for(var b = 0; b < this.maxHits;
-					this.maxRays += (2+scene.__lights.length)*
-						Math.pow(2, b++)) {}
-				
-				// toExponential ensures a float representation
-				this.fragment =
-					'#define MAX_HITS '+this.maxHits+'\n\
-					#define MAX_HITS_F '+this.maxHits+'.0\n\
-					#define MAX_RAYS '+this.maxRays+'\n\
-					#define MAX_RAYS_F '+this.maxRays+'.0\n\
-					#define NUM_QUAD_TREE_NODES '+this.numQuadTreeNodes+'\n\
-					#define NUM_QUAD_TREE_NODES_F '+this.numQuadTreeNodes+'.0\n\
-					#define NUM_MESHES '+this.numMeshes+'\n\
-					#define NUM_MESHES_F '+this.numMeshes+'.0\n\
-					#define NUM_TRIANGLES '+this.numTriangles+'\n\
-					#define NUM_TRIANGLES_F '+this.numTriangles+'.0\n\n'+
+				this.material.fragmentShader =
+					'#define HIT_BUDGET '+b.hit+'\n\
+					#define HIT_BUDGET_F '+b.hit+'.0\n\
+					#define RAY_BUDGET '+b.ray+'\n\
+					#define RAY_BUDGET_F '+b.ray+'.0\n\
+					#define QUAD_TREE_BUDGET '+b.quadTree+'\n\
+					#define QUAD_TREE_BUDGET_F '+b.quadTree+'.0\n\
+					#define MESHES_BUDGET '+b.meshes+'\n\
+					#define MESHES_BUDGET_F '+b.meshes+'.0\n\
+					#define TRIANGLES_BUDGET '+b.triangles+'\n\
+					#define TRIANGLES_BUDGET_F '+b.triangles+'.0\n\n'+
 
 					this.fragmentHeader+'\n'+this.structs+'\n'+this.util+
 					'\n'+this.readData+'\n'+this.intersections+'\n'+
+					this.intersectMeshes+'\n'+this.intersectScene+'\n'+
 					this.whittedRayTracer+'\n'+this.fragmentMain;
 
 				// Dirty material(?)
-				//this.refresh();
+				this.refresh();
 
 				return this;
 			},
 			update: function() { return this.updateDataTextures().updateLights(); },
 			updateDataTextures: function() {
-				var quadTreeTexture = this.uniforms.quadTree.texture,
-					meshesTexture = this.uniforms.meshes.texture,
-					trianglesTexture = this.uniforms.triangles.texture,
+				var u = this.uniforms,
+
+					quadTreeTexture = u.quadTree.texture,
+					meshesTexture = u.meshes.texture,
+					trianglesTexture = u.triangles.texture,
 
 					// Quadtree tier
-					nodesData = quadTreeTexture.image.data, meshIndex = 0,
+					nodesData = quadTreeTexture.image.data,
 					// Mesh tier
-					meshesData = meshesTexture.image.data, triangleIndex = 0,
+					meshesData = meshesTexture.image.data,
 					// Primitive tier
 					trianglesData = trianglesTexture.image.data,
 
-					node = this.meshTree.root, nodes = [node];
+					node = this.entities.root, nodes = [node],
+					numMeshes = 0, numTriangles = 0,
 
-				nodesData.length = meshesData.length =
-					trianglesData.length = 0;
+					inverseObjectMatrix = new THREE.Matrix4(),
+					normalMatrix = new THREE.Matrix4();
 
+				nodesData.length = meshesData.length = trianglesData.length = 0;
+
+				/* TODO: fill all possible space for the QuadTree texture,
+					to make recursion using the flattened array and
+					constant expressions giving correct offsets for
+					the next tier */
 				// Quadtree tier
 				for(var n = 0; n < nodes.length; node = nodes[++n]) {
-					var kids = node.kids.concat(node.borderKids),
+					var kids = node.kids.concat(node.edgeKids),
 						minZ = Infinity, maxZ = -Infinity;
 
 					// Mesh tier
 					for(var k = 0; k < kids.length; ++k) {
-						var shape = kids[k].shape,
+						var shape = kids[k].item.shape,
 							mesh = shape.three,
 							geometry = mesh.geometry,
 							vertices = geometry.vertices,
@@ -1882,6 +1929,7 @@
 								cn = vertexNormals[2],
 								fn = face.normal;
 
+							// TODO: vertex colors
 							trianglesData.push(a.x, a.y, a.z, 0,
 								b.x, b.y, b.z, 0,
 								c.x, c.y, c.z, 0,
@@ -1897,62 +1945,84 @@
 							}
 						}
 
-						var bR = shape.boundRad,
-							ctr = bR.position,
+						/*var bR = shape.boundRad,
+							ctr = bR.position,*/
+						var bR = mesh.boundRadius,
 
-							flatObjectMatrix = mesh.object.matrixWorld
-								.flattenToArray(),
+							flatInverseObjectMatrix = [],
+							flatObjectMatrix = [],
+							flatNormalMatrix = [],	// Already provided by THREE, but as a 3x3 matrix, which won't fit so nicely here
 
-							flatNormalMatrix = THREE.Matrix4
-								.makeInvert3x3(mesh.object.matrixWorld)
-								.transposeIntoArray(),
+							mat = shape.material,
+							diff = mat.diffuse,
+							amb = mat.ambient,
+							spec = mat.specular;
 
-							props = shape.properties,
+						inverseObjectMatrix.getInverse(mesh.matrixWorld)
+							.flattenToArray(flatInverseObjectMatrix);
 
-							gProps = props.geometry,
+						mesh.matrixWorld.flattenToArray(flatObjectMatrix);
 
-							mProps = props.material,
-							diff = mProps.diffuse,
-							amb = mProps.ambient,
-							spec = mProps.specular;
+						normalMatrix.getInverse(mesh.matrixWorld).transpose()
+							.flattenToArray(flatNormalMatrix);
 
-						meshesData = meshesData.concat(ctr.x, ctr.y, ctr.z, bR.rad,
+						meshesData = meshesData.concat(
+							bR.rad, numTriangles-1, faces.length, 0,
+							flatInverseObjectMatrix,
 							flatObjectMatrix,
 							flatNormalMatrix,
-							triangleIndex, faces.length, gProps.reflect, gProps.iOR,
-							diff.r, diff.g, diff.b, 0,
-							amb.r, amb.g, amb.b, mProps.opacity,
-							spec.r, spec.g, spec.b, mProps.shine);
+							mat.reflect, mat.iOR, mat.density, mat.opacity,
+							amb.r, amb.g, amb.b, 0,
+							diff.r, diff.g, diff.b, mat.textureID,
+							spec.r, spec.g, spec.b, mat.shine);
 
-						triangleIndex += faces.length;
+						numTriangles += faces.length;
 					}
 
-					var min = node.bounds.min, max = node.bounds.max;
+					var min = node.boundRect.pos, max = node.boundRect.size;
 
 					/* TODO: min and max z */
 					nodesData.push(min.x, min.y, minZ, 0,
 						max.x, max.y, maxZ, 0,
-						nodes.length, node.nodes.length, meshIndex, kids.length);
+						nodes.length, node.nodes.length, numMeshes-1, kids.length);
 
-					meshIndex += kids.length;
+					numMeshes += kids.length;
 					nodes = nodes.concat(node.nodes);
 				}
 
 				quadTreeTexture.image.width =
-					this.numQuadTreeNodes = nodes.length;
-				quadTreeTexture.image.height = 3;
+					u.numQuadTreeNodes.value = nodes.length;
+				quadTreeTexture.image.height = ((nodes.length)? 3 : 0);
 
-				meshesTexture.image.width = 
-					this.numMeshes = meshIndex+1;
-				meshesTexture.image.height = 13;
+				meshesTexture.image.width = u.numMeshes.value = numMeshes;
+				meshesTexture.image.height = ((numMeshes)? 17 : 0);
 
-				trianglesTexture.image.width =
-					this.numTriangles = triangleIndex+1;
-				trianglesTexture.image.height = 6;
+				trianglesTexture.image.width = u.numTriangles.value = numTriangles;
+				trianglesTexture.image.height = ((numTriangles)? 6 : 0);
 
 				quadTreeTexture.needsUpdate =
 					meshesTexture.needsUpdate =
 						trianglesTexture.needsUpdate = true;
+
+				var bud = this.budgets;
+
+				if(bud.autoSetup) {
+					var setup = false;
+
+					if(nodes.length > bud.quadTree) {
+						this.setQuadTreeBudget(this.entities.root.depth);
+					}
+					if(numMeshes > bud.meshes) {
+						bud.meshes = Math.floor(numMeshes*bud.growth);
+						setup = true;
+					}
+					if(numTriangles > bud.triangles) {
+						bud.triangles = Math.floor(numTriangles*bud.growth);
+						setup = true;
+					}
+
+					if(setup) { this.setup(); }
+				}
 
 				return this;
 			},
@@ -1966,34 +2036,71 @@
 					dummy information (0 intensity)
 
 					Then again, this could be out of date entirey... */
+				var u = this.uniforms,
+					d = u.spotLightDirection.value,
+					ca = u.spotLightCosAngle.value,
+					f = u.spotLightFalloff.value,
 
-				for(var l = 0, vecOffset = 0, lights = this.scene.__lights, ll = lights.length;
-					l < ll; ++l, vecOffset = l*3) {
+					lights = this.scene.lights, ll = lights.length;
+
+				for(var l = 0, vecOffset = 0; l < ll; ++l) {
 					var light = lights[l];
 
 					if(light instanceof SpotLight) {
-						this.uniforms.spotLightDirection[vecOffset] = light.direction.x;
-						this.uniforms.spotLightDirection[vecOffset+1] = light.direction.x;
-						this.uniforms.spotLightDirection[vecOffset+2] = light.direction.x;
+						d[vecOffset++] = light.direction.x;
+						d[vecOffset++] = light.direction.x;
+						d[vecOffset++] = light.direction.x;
 
-						this.uniforms.spotLightCosAngle[l] = cos(light.angle);
-						this.uniforms.spotLightFalloff[l] = light.falloff;
+						ca[l] = Math.cos(light.angle);
+						f[l] = light.falloff;
 					}
 					else {
-						this.uniforms.spotLightDirection[vecOffset] =
-							this.uniforms.spotLightDirection[vecOffset+1] =
-								this.uniforms.spotLightDirection[vecOffset+2] = 0;
-
-						this.uniforms.spotLightCosAngle[l] =
-							this.uniforms.spotLightFalloff[l] = -1.0;
+						d[vecOffset++] = d[vecOffset++] = d[vecOffset++] = 0;
+						ca[l] = f[l] = -1.0;
 					}
+				}
+
+				if(this.budgets.autoSetup && ll > this.budgets.lights) {
+					this.budgets.lights = ll;
+					this.setup();
 				}
 
 				return this;
 			},
-			setHits: function(hits) {
-				this.hits = hits;
-				return this.setup();
+			setQuadTreeBudget: function(depth) {
+				this.budgets.quadTree = 0;
+
+				for(var d = 0; d < depth;
+					this.budgets.quadTree += Math.pow(4, d++)) {}
+
+				return this;
+			},
+			setHitBudget: function(hits) {
+				this.budgets.hit = hits;
+				this.budgets.ray = this.numRays(hits);
+
+				return this;
+			},
+			setHitMax: function(hits) {
+				this.uniforms.maxHits.value = hits;
+				this.uniforms.maxRays.value = this.numRays(hits);
+
+				if(this.budgets.autoSetup && hits > this.budgets.hit) {
+					this.budgets.lights = this.scene.lights.length;
+					this.setHitBudget(hits).setup();
+				}
+
+				return this;
+			},
+			numRays: function(hits) {
+				var rays = 1;
+
+				// TODO: reflect and refract shadow rays for caustics etc
+				for(var h = 0; h < hits;
+					rays += (2+this.scene.lights.length)*
+						Math.pow(2, h++)) {}
+
+				return rays;
 			},
 			refresh: function() {
 				this.material.needsUpdate = true;
@@ -2052,18 +2159,19 @@
 				"uniform vec3 specular;"+
 				"uniform float shininess;"+*/
 
+				// toExponential ensures a float representation
 				'#define PAD 0.25\n\
 				\n\
 				#define NODE_STEP '+(1.0/3.0).toExponential()+'\n\
 				#define NODE_PAD '+(0.25/3.0).toExponential()+'\n\
 				\n\
-				#define MESH_DATA_STEP '+(1.0/13.0).toExponential()+'\n\
-				#define MESH_DATA_PAD '+(0.25/13.0).toExponential()+'\n\
-				#define BOUNDING_SPHERE_OFFSET 0.0\n\
-				#define OBJECT_MATRIX_OFFSET '+(1.0/13.0).toExponential()+'\n\
-				#define NORMAL_MATRIX_OFFSET '+(5.0/13.0).toExponential()+'\n\
-				#define GEOMETRY_OFFSET '+(9.0/13.0).toExponential()+'\n\
-				#define MATERIAL_OFFSET '+(10.0/13.0).toExponential()+'\n\
+				#define MESH_DATA_STEP '+(1.0/17.0).toExponential()+'\n\
+				#define MESH_DATA_PAD '+(0.25/17.0).toExponential()+'\n\
+				#define MESH_OFFSET 0.0\n\
+				#define INVERSE_OBJECT_MATRIX_OFFSET '+(1.0/17.0).toExponential()+'\n\
+				#define OBJECT_MATRIX_OFFSET '+(5.0/17.0).toExponential()+'\n\
+				#define NORMAL_MATRIX_OFFSET '+(9.0/17.0).toExponential()+'\n\
+				#define MATERIAL_OFFSET '+(14.0/17.0).toExponential()+'\n\
 				\n\
 				#define TRI_POINT_STEP '+(1.0/6.0).toExponential()+'\n\
 				#define TRI_POINT_PAD '+(0.25/6.0).toExponential()+'\n\
@@ -2088,7 +2196,14 @@
 				uniform sampler2D meshes;\n\
 				uniform sampler2D triangles;\n\
 				\n\
+				uniform float numQuadTreeNodes;\n\
+				uniform float numMeshes;\n\
+				uniform float numTriangles;\n\
+				\n\
 				uniform float infinity;\n\
+				\n\
+				uniform int maxHits;\n\
+				uniform int maxRays;\n\
 				\n\
 				varying vec4 pos;',
 				
@@ -2101,25 +2216,27 @@
 					\n\
 					vec3 light;	/* The light being transmitted (color, energy) */\n\
 					float iOR;	/* The index of refraction of the medium the ray is currently travelling through */\n\
-					int tLight;	/* The distance to the target light - set for shadow rays, -1.0 otherwise */\n\
+					float tLight;	/* The distance to the target light - set for shadow rays, -1.0 otherwise */\n\
 				};\n\
 				\n\
-				struct AABBox {\n\
+				struct AABox {\n\
 					vec3 min;\n\
 					vec3 max;\n\
 				};\n\
 				\n\
 				struct Node {\n\
-					AABBox bounds;\n\
+					AABox bounds;\n\
 					float subNodesIndex;\n\
 					float numSubNodes;\n\
 					float meshesIndex;\n\
-					float numMeshes;\n\
+					float meshCount;\n\
 				};\n\
 				\n\
-				struct Sphere {\n\
-					vec3 pos;\n\
-					float rad;\n\
+				struct Mesh {\n\
+					float boundRad;\n\
+					\n\
+					float trianglesIndex;\n\
+					float triangleCount;\n\
 				};\n\
 				\n\
 				struct Triangle {\n\
@@ -2128,20 +2245,16 @@
 					vec3 faceNormal;\n\
 				};\n\
 				\n\
-				struct Geometry {	/* A bit messy, but it fits the data packing/fetching better */\n\
-					float trianglesIndex;\n\
-					float numTriangles;\n\
-					\n\
+				struct Material {\n\
 					float reflect;\n\
 					float iOR;\n\
-				};\n\
-				\n\
-				struct Properties {\n\
-					vec3 diffuse;	/* If textureID is valid, multiply texel by diffuse, if not, just use diffuse */\n\
-					int textureID;\n\
+					float density;\n\
+					float opacity;\n\
 					\n\
 					vec3 ambient;\n\
-					float opacity;\n\
+					\n\
+					vec3 diffuse;	/* If textureID is valid, multiply texel by diffuse, if not, just use diffuse */\n\
+					int textureID;\n\
 					\n\
 					vec3 specular;\n\
 					float shine;\n\
@@ -2153,36 +2266,46 @@
 				bool inRange(float t) { return (EPSILON <= t && t < infinity); }\n\
 				\n\
 				Ray transform(Ray ray, mat4 matrix) {\n\
-					return Ray(matrix*vec4(ray.origin, 1.0),\n\
-						matrix*vec4(ray.origin, 0.0),\n\
+					return Ray((matrix*vec4(ray.origin, 1.0)).xyz,\n\
+						normalize((matrix*vec4(ray.dir, 0.0)).xyz),	/* Does this need to be normalised again? */\n\
 						ray.hit, ray.light, ray.iOR, ray.tLight);\n\
+				}\n\
+				\n\
+				void doTransform(inout Triangle tri, mat4 objMat, mat4 normMat) {\n\
+					for(int p = 0; p < 3; ++p) {\n\
+						tri.points[p] = (objMat*vec4(tri.points[p], 1.0)).xyz;\n\
+					}\n\
+					for(int n = 0; n < 3; ++n) {\n\
+						tri.normals[n] = normalize((normMat*vec4(tri.normals[n], 0.0)).xyz);	/* Does this need to be normalised again? */\n\
+					}\n\
+					tri.faceNormal = normalize((normMat*vec4(tri.faceNormal, 0.0)).xyz);\n\
 				}',
 
 			/* Functions for reading in data from the respective textures
 				and returning a useable object */
 			readData:
 				'Node getNode(float index) {\n\
-					float i = (index+PAD)/NUM_QUAD_TREE_NODES_F,\n\
+					float i = (index+PAD)/numQuadTreeNodes,\n\
 						j = NODE_PAD;\n\
 					\n\
 					vec4 pointers = texture2D(quadTree,\n\
 						vec2(i, j+2.0*NODE_STEP));\n\
 					\n\
-					return Node(AABBox(texture2D(quadTree, vec2(i, j)).xyz,\n\
+					return Node(AABox(texture2D(quadTree, vec2(i, j)).xyz,\n\
 							texture2D(quadTree, vec2(i, j += NODE_STEP)).xyz),\n\
-						pointers.x, pointers.y, pointers.z, pointers.w));\n\
+						pointers.x, pointers.y, pointers.z, pointers.w);\n\
 				}\n\
 				\n\
-				Sphere getBoundingSphere(float index) {\n\
+				Mesh getMesh(float index) {\n\
 					vec4 data = texture2D(meshes,\n\
-							vec2((index+PAD)/NUM_MESHES_F,\n\
-								BOUNDING_SPHERE_OFFSET+MESH_DATA_PAD));\n\
+							vec2((index+PAD)/numMeshes,\n\
+								MESH_OFFSET+MESH_DATA_PAD));\n\
 					\n\
-					return Sphere(data.xyz, data.w);\n\
+					return Mesh(data.x, data.y, data.z);\n\
 				}\n\
 				\n\
 				mat4 getMatrix(float index, float offset) {\n\
-					float i = (index+PAD)/NUM_MESHES_F,\n\
+					float i = (index+PAD)/numMeshes,\n\
 						j = offset+MESH_DATA_PAD;\n\
 					\n\
 					// Note: OpenGL matrices are column-major - weird, be careful\n\
@@ -2194,47 +2317,44 @@
 				\n\
 				/* Multiply the ray (in world space) by the inverse of the\n\
 					transformation matrix when testing for intersections,\n\
-					to reduce the number of multiplications - if there\'s a\n\
-					hit, move the point back into world space by multiplying\n\
-					it by the transformation matrix */\n\
+					to reduce the number of multiplications */\n\
+				mat4 getInverseObjectMatrix(float index) {\n\
+					return getMatrix(index, INVERSE_OBJECT_MATRIX_OFFSET);\n\
+				}\n\
+				\n\
+				/* If there\'s a hit, move the point back into world space\n\
+					by multiplying it by the transformation matrix */\n\
 				mat4 getObjectMatrix(float index) {\n\
 					return getMatrix(index, OBJECT_MATRIX_OFFSET);\n\
 				}\n\
 				\n\
-				/* Normals must be handled as well, and must be\n\
-					multiplied by a normal matrix - the transpose of the\n\
-					inverse of the transformation matrix, with w = 0 (to\n\
-					remove translation) - so, do we send down normal matrices\n\
-					for each object too? - http://www.unknownroad.com/rtfm/graphics/rt_normals.html */\n\
+				/* Normals must be handled as well, once a hit is found,\n\
+					and must be multiplied by the normal matrix - the\n\
+					transpose of the inverse of the transformation matrix,\n\
+					with w = 0 (to remove translation)\n\
+					http://www.unknownroad.com/rtfm/graphics/rt_normals.html */\n\
 				mat4 getNormalMatrix(float index) {\n\
 					return getMatrix(index, NORMAL_MATRIX_OFFSET);\n\
 				}\n\
 				\n\
-				Geometry getGeometry(float index) {\n\
-					float i = (index+PAD)/NUM_MESHES_F,\n\
-						j = GEOMETRY_OFFSET+MESH_DATA_PAD;\n\
-					\n\
-					vec4 data = texture2D(properties, vec2(i, j));\n\
-					\n\
-					return Geometry(data.r, data.g, data.b, data.a);\n\
-				}\n\
-				\n\
 				Material getMaterial(float index) {\n\
-					float i = (index+PAD)/NUM_MESHES_F,\n\
+					float i = (index+PAD)/numMeshes,\n\
 						j = MATERIAL_OFFSET+MESH_DATA_PAD;\n\
 					\n\
-					vec4 data[3];\n\
+					vec4 data[4];\n\
 					\n\
-					data[0] = texture2D(properties, vec2(i, j));\n\
-					data[1] = texture2D(properties, vec2(i, j += MESH_DATA_STEP));\n\
-					data[2] = texture2D(properties, vec2(i, j += MESH_DATA_STEP));\n\
+					data[0] = texture2D(meshes, vec2(i, j));\n\
+					data[1] = texture2D(meshes, vec2(i, j += MESH_DATA_STEP));\n\
+					data[2] = texture2D(meshes, vec2(i, j += MESH_DATA_STEP));\n\
+					data[3] = texture2D(meshes, vec2(i, j += MESH_DATA_STEP));\n\
 					\n\
-					return Material(data[0].rgb, data[0].a,\n\
-						data[1].rgb, data[1].a, data[2].rgb, data[2].a);\n\
+					return Material(data[0].r, data[0].g, data[0].b, data[0].a,\n\
+						data[1].rgb,\n\
+						data[2].rgb, int(data[2].a), data[3].rgb, data[3].a);\n\
 				}\n\
 				\n\
 				Triangle getTriangle(float index) {\n\
-					float i = (index+PAD)/NUM_TRIANGLES_F,\n\
+					float i = (index+PAD)/numTriangles,\n\
 						j = TRI_POINT_PAD;\n\
 					Triangle t;\n\
 					\n\
@@ -2252,11 +2372,11 @@
 						http://www.lighthouse3d.com/tutorials/glsl-tutorial/the-normal-matrix/ */\n\
 					vec4 n[3];\n\
 					\n\
-					n[0] = texture2D(triangles, i,\n\
+					n[0] = texture2D(triangles,\n\
 							vec2(i, j += TRI_POINT_STEP));\n\
-					n[1] = texture2D(triangles, i,\n\
+					n[1] = texture2D(triangles,\n\
 							vec2(i, j += TRI_POINT_STEP));\n\
-					n[2] = texture2D(triangles, i,\n\
+					n[2] = texture2D(triangles,\n\
 							vec2(i, j += TRI_POINT_STEP));\n\
 					\n\
 					t.normals[0] = n[0].xyz;\n\
@@ -2275,13 +2395,13 @@
 				'/* Kajiya et al\n\
 					http://code.google.com/p/rtrt-on-gpu/source/browse/trunk/Source/GLSL+Tutorial/Implicit+Surfaces/Fragment.glsl?r=305#147\n\
 					http://www.gamedev.net/topic/495636-raybox-collision-intersection-point/ */\n\
-				float intersection(Ray ray, AABBox box) {\n\
+				float intersection(Ray ray, AABox box) {\n\
 					float t = -1.0;\n\
 					\n\
 					/* Cater for the special case where the ray originates\n\
 						inside the box - this must be handled explicitly */\n\
 					if(all(greaterThan(ray.origin, box.min)) &&\n\
-						all(lessThan(ray.origin, box.max))) { t = 0.0; }\n\
+						all(lessThan(ray.origin, box.max))) { t = EPSILON; }\n\
 					else {\n\
 						vec3 tmin = (box.min-ray.origin)/ray.dir;\n\
 						vec3 tmax = (box.max-ray.origin)/ray.dir;\n\
@@ -2289,8 +2409,8 @@
 						vec3 rmax = max(tmax, tmin);\n\
 						vec3 rmin = min(tmax, tmin);\n\
 						\n\
-						end = min(rmax.x, min(rmax.y, rmax.z));\n\
-						start = max(max(rmin.x, 0.0), max(rmin.y, rmin.z));\n\
+						float end = min(rmax.x, min(rmax.y, rmax.z));\n\
+						float start = max(max(rmin.x, 0.0), max(rmin.y, rmin.z));\n\
 						\n\
 						if(end > start) { t = start; }\n\
 						//return final > start;\n\
@@ -2300,10 +2420,10 @@
 				}\n\
 				\n\
 				/* See "Intersecting a Sphere" at http://www.cs.unc.edu/~rademach/xroads-RT/RTarticle.html */\n\
-				float intersection(Ray ray, Sphere sphere) {\n\
-					vec3 oc = sphere.pos-ray.origin;\n\
+				float intersection(Ray ray, float rad) {\n\
+					vec3 oc = -ray.origin;\n\
 					float v = dot(oc, ray.dir);\n\
-					float dSq = s.rad*s.rad-(dot(oc, oc)-v*v);\n\
+					float dSq = rad*rad-(dot(oc, oc)-v*v);\n\
 					\n\
 					return ((dSq >= 0.0)? v-sqrt(dSq) : -1.0);\n\
 				}\n\
@@ -2318,20 +2438,19 @@
 				}\n\
 				\n\
 				/* Barycentric coordinate test - http://www.blackpawn.com/texts/pointinpoly/default.html */\n\
-				float intersection(Ray ray, Triangle triangle) {\n\
-					/* TODO: transform ray, transform hit point back */\n\
-					\n\
+				float intersection(Ray ray, Triangle triangle, out vec3 hit) {\n\
+					hit = ray.origin;	// Mark it invalid\n\
 					float t = intersection(ray, triangle.points[0],\n\
 						triangle.faceNormal);\n\
 					\n\
-					// Check if parrallel to or behind ray\n\
+					// Check if parallel to or behind ray\n\
 					if(inRange(t)) {\n\
-						vec3 point = ray.origin+ray.dir*t;\n\
+						vec3 p = ray.origin+ray.dir*t;\n\
 						\n\
 						// Compute vectors\n\
 						vec3 v0 = triangle.points[2]-triangle.points[0];\n\
 						vec3 v1 = triangle.points[1]-triangle.points[0];\n\
-						vec3 v2 = point-triangle.points[0];\n\
+						vec3 v2 = p-triangle.points[0];\n\
 						\n\
 						// Compute dot products\n\
 						float dot00 = dot(v0, v0);\n\
@@ -2341,18 +2460,73 @@
 						float dot12 = dot(v1, v2);\n\
 						\n\
 						// Compute barycentric coordinates\n\
-						float invDenom = 1/(dot00*dot11-dot01*dot01);\n\
+						float invDenom = 1.0/(dot00*dot11-dot01*dot01);\n\
 						float u = (dot11*dot02-dot01*dot12)*invDenom;\n\
 						float v = (dot00*dot12-dot01*dot02)*invDenom;\n\
 						\n\
 						// Check if point is in triangle\n\
-						if(u < 0.0 || v < 0.0 || u+v >= 1.0) { t = -1.0; }\n\
+						if(u < 0.0 || v < 0.0 || u+v >= 1.0) {\n\
+							hit = p;\n\
+							t = -1.0;\n\
+						}\n\
 					}\n\
 					\n\
 					return t;\n\
-				}\n\
-				\n\
-				float intersection(Ray ray, out float meshID, out Triangle triangle) {\n\
+				}',
+
+			intersectMeshes:
+				'/* Finds the closest intersection along the ray with the\n\
+					referenced meshes, in object space - messy to leave the\n\
+					responsibility of transforming back to some other function\n\
+					that didn\'t apply the transformation in the first place,\n\
+					but it\'s quicker than doing that for each mesh */\n\
+				float intersection(Ray ray, float meshesIndex, float meshCount,\n\
+					out float meshID, out Triangle triangle, out vec3 hit) {\n\
+					float closest = infinity;\n\
+					float mID = meshesIndex;\n\
+					\n\
+					for(float m = 0.0; m < MESHES_BUDGET_F; ++m) {\n\
+						if(m < meshCount) {\n\
+							Mesh mesh = getMesh(mID);\n\
+							Ray tRay = transform(ray,\n\
+								getInverseObjectMatrix(mID));\n\
+							\n\
+							if(inRange(intersection(tRay, mesh.boundRad))) {	/* Check mesh bounding radii */\n\
+								/* Check mesh triangles */\n\
+								float tn = mesh.trianglesIndex;\n\
+								\n\
+								for(float t = 0.0; t < TRIANGLES_BUDGET_F; ++t) {\n\
+									if(t < mesh.triangleCount) {	/* Check for end of list */\n\
+										Triangle tri = getTriangle(tn);\n\
+										vec3 h;\n\
+										float tT = intersection(tRay, tri, h);\n\
+										\n\
+										if(EPSILON <= tT && tT < closest) {\n\
+											closest = tT;\n\
+											meshID = mID;\n\
+											triangle = tri;\n\
+											hit = h;\n\
+										}\n\
+										\n\
+										++tn;\n\
+									}\n\
+									else { break; }\n\
+								}\n\
+							}\n\
+							\n\
+							++mID;\n\
+						}\n\
+						else { break; }	/* Check for end of list */\n\
+					}\n\
+					\n\
+					return closest;\n\
+				}',
+
+			intersectScene:
+				'/* Finds the closest intersection along the ray with the\n\
+					entire scene, in object space */\n\
+				float intersection(Ray ray, out float meshID,\n\
+					out Triangle triangle, out vec3 hit) {\n\
 					float closest = infinity;\n\
 					\n\
 					/* For the sake of optimisation, loops are extremely\n\
@@ -2361,33 +2535,44 @@
 						seems to need to be figured out at compile time, not\n\
 						run time - hence, set up a budget of the maximum possible\n\
 						number of loops, and break early if not all are needed */\n\
-					float nodes[NUM_QUAD_TREE_NODES];\n\
+					float nodes[QUAD_TREE_BUDGET];\n\
 					nodes[0] = 0.0;\n\
 					int nLast = 0;\n\
 					\n\
 					/* Traverse quadTree */\n\
-					for(int n = 0; n < NUM_QUAD_TREE_NODES; ++n) {\n\
-						if(n <= nLast) {\n\
+					for(int n = 0; n < QUAD_TREE_BUDGET; ++n) {\n\
+						if(n <= nLast && float(n) < numQuadTreeNodes) {\n\
 							Node node = getNode(nodes[n]);\n\
 							\n\
-							if(node.numSubNodes > 0.0 || node.numMeshes > 0.0) {	/* Check if empty before checking intersection */\n\
+							if(node.numSubNodes > 0.0 || node.meshCount > 0.0) {	/* Check if empty before checking intersection */\n\
 								if(inRange(intersection(ray, node.bounds))) {\n\
 									if(node.numSubNodes > 0.0) {\n\
-										for(float i = 0.0; i < 4.0; ++i) {\n\
-											nodes[++nLast] = node.subNodesIndex+i;\n\
+										for(int nl = 0; nl < QUAD_TREE_BUDGET; ++nl) {\n\
+											if(nl > nLast) {	/* Super-ugly hack to get the last element in the flat node list, since GLSL ES doesn\'t allow non-constant expressions to be used to index an array (so no "nodes[++nLast] = node.subNodesIndex", which is the nice way to do it) */\n\
+												nodes[nl] = node.subNodesIndex;\n\
+												nodes[nl+1] = node.subNodesIndex+1.0;\n\
+												nodes[nl+2] = node.subNodesIndex+2.0;\n\
+												nodes[nl+3] = node.subNodesIndex+3.0;\n\
+												\n\
+												nodes[nl+4] = -1.0;\n\
+												nLast = nl+4;\n\
+												break;\n\
+											}\n\
 										}\n\
 									}\n\
 									\n\
-									if(node.numMeshes > 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\n\
+									if(node.meshCount > 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\n\
 										float mID;\n\
 										Triangle tri;\n\
+										vec3 h;\n\
 										float mT = intersection(ray, node.meshesIndex,\n\
-												node.numMeshes, mID, tri);\n\
+												node.meshCount, mID, tri, h);\n\
 										\n\
 										if(mT < closest) {\n\
 											closest = mT;\n\
 											triangle = tri;\n\
 											meshID = mID;\n\
+											hit = h;\n\
 										}\n\
 									}\n\
 								}\n\
@@ -2397,38 +2582,41 @@
 					}\n\
 					\n\
 					return closest;\n\
-				}\n\
-				\n\
-				float intersection(Ray ray, float meshesIndex, float numMeshes,\n\
-					out float meshID, out Triangle triangle) {\n\
+				}',
+
+			intersectSceneFlat:
+				'/* Finds the closest intersection along the ray with the\n\
+					entire scene, in object space - intersects all QuadTree\n\
+					nodes, so ensure only the bottom tier is sent down */\n\
+				float intersection(Ray ray, out float meshID,\n\
+					out Triangle triangle, out vec3 hit) {\n\
 					float closest = infinity;\n\
-					float mID = meshesIndex;\n\
+					Node node;\n\
+					int nLast = 0;\n\
 					\n\
-					for(float m = 0.0; m < NUM_MESHES_F; ++m) {\n\
-						if(m >= numMeshes) { break; }	/* Check for end of list */\n\
-						else if(inRange(intersection(ray, getBoundingSphere(mID)))) {	/* Check mesh bounding radii */\n\
-							/* Check mesh triangles */\n\
-							Geometry geometry = getGeometry(mID);\n\
-							float tn = geometry.trianglesIndex;\n\
+					/* Traverse quadTree */\n\
+					for(int n = 0; n < QUAD_TREE_BUDGET; ++n) {\n\
+						if(n < numQuadTreeNodes) {\n\
+							node = getNode(nodes[n]);\n\
 							\n\
-							for(float t = 0.0; t < NUM_TRIANGLES_F; ++t) {\n\
-								if(t < geometry.numTriangles) {	/* Check for end of list */\n\
-									Triangle tri = getTriangle(tn);\n\
-									float tT = intersection(ray, tri);\n\
+							if(node.meshCount > 0.0) {	/* Check if empty before checking intersection */\n\
+								if(inRange(intersection(ray, node.bounds))) {\n\
+									float mID;\n\
+									Triangle tri;\n\
+									vec3 h;\n\
+									float mT = intersection(ray, node.meshesIndex,\n\
+											node.meshCount, mID, tri, h);\n\
 									\n\
-									if(EPSILON <= tT && tT < closest) {\n\
-										closest = tT;\n\
+									if(mT < closest) {\n\
+										closest = mT;\n\
 										triangle = tri;\n\
 										meshID = mID;\n\
+										hit = h;\n\
 									}\n\
-									\n\
-									++tn;\n\
 								}\n\
-								else { break; }\n\
 							}\n\
-							\n\
-							++mID;\n\
 						}\n\
+						else { break; }\n\
 					}\n\
 					\n\
 					return closest;\n\
@@ -2442,7 +2630,7 @@
 				'vec3 traceRays(Ray eyeRay) {\n\
 					vec3 accColor;\n\
 					\n\
-					Ray rays[MAX_RAYS];\n\
+					Ray rays[RAY_BUDGET];\n\
 					\n\
 					/* TODO: figure out if the eye ray needs to be traced,\n\
 						or if nothing is between the fragment and the\n\
@@ -2456,147 +2644,182 @@
 						traced) */\n\
 					int rLast = 0;\n\
 					\n\
-					for(int r = 0; r < MAX_RAYS; ++r) {\n\
-						if(r <= rLast) {\n\
+					float meshID;\n\
+					Triangle triangle;\n\
+					vec3 hit;\n\
+					\n\
+					for(int r = 0; r < RAY_BUDGET; ++r) {\n\
+						if(r <= rLast && r < maxRays) {\n\
 							Ray ray = rays[r];\n\
-							float meshID;\n\
-							Triangle triangle;\n\
-							float t = intersection(ray, meshID, triangle);\n\
+							float t = intersection(ray, meshID, triangle, hit);\n\
 							\n\
 							/* Calculate color from closest intersection */\n\
 							if(EPSILON <= ray.tLight &&	/* Shadow ray */\n\
 								(ray.tLight <= t || t < EPSILON)) {	/* Light closer or no hit */\n\
+								/* TODO: caustics, reflected light\n\
+									Cast further reflected and refracted shadow\n\
+									rays which accumulate color correctlty in the\n\
+									case of an intersection with a reflective\n\
+									or refractive mesh */\n\
 								/* Final color accumulation - direct light */\n\
 								accColor += ray.light;\n\
 							}\n\
-							else if(inRange(t) && ray.hit < MAX_HITS) {\n\
+							else if(inRange(t) && ray.hit < maxHits) {\n\
 								/* Cast shadow, reflection, and\n\
 									refraction rays, if the energy is\n\
 									over the threshold */\n\
-								int hit = ray.hit+1;\n\
-								vec3 hitPoint = ray.origin+ray.dir*t;\n\
+								int h = ray.hit+1;\n\
+								\n\
+								mat4 objMat = getObjectMatrix(meshID);\n\
+								hit = (objMat*vec4(hit, 1.0)).xyz;\n\
+								doTransform(triangle, objMat, getNormalMatrix(meshID));\n\
+								\n\
 								/* TODO: get smooth normal - dots \'n\' mixes */\n\
 								vec3 hitNormal = triangle.faceNormal;\n\
-								Geometry geo = getGeometry(meshID);\n\
-								Material mat = getMaterial(meshID);\n\
+								Material material = getMaterial(meshID);\n\
 								\n\
 								/* Set iOR according to whether leaving or\n\
 									entering material */\n\
 								if(dot(ray.dir, hitNormal) >= 0.0) {\n\
-									geo.iOR = MEDIUM_IOR;\n\
+									material.iOR = MEDIUM_IOR;\n\
 								}\n\
 								\n\
 								// Shadow\n\
-								vec3 shLight = mat.opacity*ray.light*\n\
-										(mat.ambient+mat.diffuse+\n\
-										mat.specular);\n\
+								vec3 shLight = material.opacity*ray.light*\n\
+										(material.ambient+material.diffuse+\n\
+										material.specular);\n\
 								\n\
 								if(sum(shLight) > 0.0) {\n\
-									/* Get the hitPoint color */\n\
+									/* Get the hit color */\n\
 									/* Branching is slow - only do it there\'s a\n\
 										significant chunk of code inside */\n\
-									vec3 ambient = ambientLightColor*mat.ambient;\n\
+									vec3 ambient = ambientLightColor*material.ambient;\n\
 									\n\
-									#if MAX_POINT_LIGHTS > 0\n\
-										for(int l = 0; l < MAX_POINT_LIGHTS; ++l) {\n\
-											vec3 lightColor = pointLightColor[l];\n\
+									for(int l = 0; l < MAX_POINT_LIGHTS; ++l) {\n\
+										vec3 lightColor = pointLightColor[l];\n\
+										\n\
+										if(sum(lightColor) > 0.0) {\n\
+											vec3 toLight = pointLightPosition[l]-hit;\n\
+											float dist = length(toLight);\n\
 											\n\
-											if(sum(lightColor) > 0.0) {\n\
-												vec3 toLight = pointLightPosition[l]-hitPoint;\n\
-												float dist = length(toLight);\n\
+											toLight /= dist;\n\
+											\n\
+											vec3 fromLight = -toLight;\n\
+											\n\
+											/* If falloff distance, determine attenuation\n\
+												http://imdoingitwrong.wordpress.com/2011/02/10/improved-light-attenuation/ */\n\
+											float attenuation = 1.0,\n\
+												lightRange = pointLightDistance[l];\n\
+											\n\
+											if(lightRange > 0.0) {\n\
+												float distFactor = dist/\n\
+														(1.0-pow(dist/lightRange, 2.0));\n\
 												\n\
-												toLight /= dist;\n\
+												attenuation = 1.0/pow(distFactor+1.0, 2.0);\n\
+											}\n\
+											\n\
+											float lightCosAngle = spotLightCosAngle[l];\n\
+											\n\
+											/* If spot light, determine if within spot light cone */\n\
+											if(attenuation > 0.0 &&\n\
+												-1.0 < lightCosAngle && lightCosAngle < 1.0) {	/* In the range [0-180], exclusive - should it be [0, 1]->[90, 0]? (see attenuation with spot falloff) */\n\
+												float cosAngle = dot(fromLight,\n\
+													spotLightDirection[l]);\n\
 												\n\
-												vec3 fromLight = -toLight;\n\
+												attenuation *= ((lightCosAngle <= cosAngle)?\n\
+													/* Which will result in proper attenuation?\n\
+														http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/\n\
+														http://dl.dropbox.com/u/2022279/OpenGL%20ES%202.0%20Programming%20Guide.pdf */\n\
+													pow(cosAngle, spotLightFalloff[l]) : 0.0);\n\
+													//pow((cosAngle+1.0)*0.5, spotLightFalloff[l]) : 0.0);\n\
+											}\n\
+											\n\
+											if(attenuation > 0.0) {	/* Don\'t bother calculating color or casting if outside of light range */\n\
+												/* Compute the phong shading at the hit\n\
+													Ambient is only accumulated once, so do\n\
+													that outside this loop */\n\
+												vec3 rayColor;\n\
 												\n\
-												/* If falloff distance, determine attenuation\n\
-													http://imdoingitwrong.wordpress.com/2011/02/10/improved-light-attenuation/ */\n\
-												float attenuation = 1.0,\n\
-													lightRange = pointLightDistance[l];\n\
+												vec3 diffuse = material.diffuse*lightColor*\n\
+														max(dot(hitNormal, toLight), 0.0);\n\
 												\n\
-												if(lightRange > 0.0) {\n\
-													float distFactor = dist/\n\
-															(1-pow(dist/lightRange, 2.0));\n\
+												/* TODO: texturing *//*\n\
+												if(material.textureID >= 0) {\n\
+													vec4 texel = texture2D(textures[material.textureID],\n\
+														getTextureCoord(meshID, hit));\n\
 													\n\
-													attenuation = 1.0/pow(distFactor+1.0, 2.0);\n\
+													diffuse *= texel.rgb*texel.a;\n\
+												}*/\n\
+												\n\
+												rayColor += diffuse;\n\
+												\n\
+												if(sum(material.specular) > 0.0) {\n\
+													vec3 reflection = reflect(toLight, hitNormal);\n\
+													float highlight = max(dot(reflection, ray.dir), 0.0);\n\
+													vec3 specular = material.specular*lightColor*\n\
+															pow(highlight, material.shine);\n\
+													\n\
+													rayColor += specular;\n\
 												}\n\
 												\n\
-												float lightCosAngle = spotLightCosAngle[l];\n\
+												rayColor *= material.opacity;\n\
 												\n\
-												/* If spot light, determine if within spot light cone */\n\
-												if(attenuation > 0.0 &&\n\
-													-1.0 < lightCosAngle && lightCosAngle < 1.0) {	/* In the range [0-180], exclusive - should it be [0, 1]->[90, 0]? (see attenuation with spot falloff) */\n\
-													float cosAngle = dot(fromLight,\n\
-														spotLightDirection[l]);\n\
+												if(sum(rayColor) > 0.0) {	/* Don\'t bother casting if it\'s just black anyway  */\n\
+													/* TODO: take jittered samples for soft shadows? */\n\
+													Ray shadow = Ray(hit,\n\
+														toLight, h,\n\
+														shLight*rayColor*attenuation,\n\
+														material.iOR, dist);\n\
 													\n\
-													attenuation *= ((lightCosAngle <= cosAngle)?\n\
-														/* Which will result in proper attenuation?\n\
-															http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/\n\
-															http://dl.dropbox.com/u/2022279/OpenGL%20ES%202.0%20Programming%20Guide.pdf */\n\
-														pow(cosAngle, spotLightFalloff[l]) : 0.0);\n\
-														//pow((cosAngle+1.0)*0.5, spotLightFalloff[l]) : 0.0);\n\
-												}\n\
-												\n\
-												if(attenuation > 0.0) {	/* Don\'t bother calculating color or casting if outside of light range */\n\
-													/* Compute the phong shading at the hitPoint\n\
-														Ambient is only accumulated once, so do\n\
-														that outside this loop */\n\
-													vec3 rayColor;\n\
+													float meshIDSh;\n\
+													Triangle triangleSh;\n\
+													vec3 hitSh;\n\
 													\n\
-													vec3 diffuse = mat.diffuse*lightColor*\n\
-															max(dot(hitNormal, toLight), 0.0);\n\
+													float tSh = intersection(shadow,\n\
+															meshIDSh, triangleSh, hitSh);\n\
 													\n\
-													/* TODO: texturing *//*\n\
-													if(mat.textureID >= 0) {\n\
-														vec4 texel = texture2D(textures[mat.textureID],\n\
-															getTextureCoord(meshID, hitPoint));\n\
-														\n\
-														diffuse *= texel.rgb*texel.a;\n\
-													}*/\n\
-													\n\
-													rayColor += diffuse;\n\
-													\n\
-													if(sum(mat.specular) > 0.0) {\n\
-														float reflection = reflect(toLight, hitNormal);\n\
-														float highlight = max(dot(reflection, ray.dir), 0.0);\n\
-														vec3 specular = mat.specular*lightColor*\n\
-																pow(highlight, mat.shine);\n\
-														\n\
-														rayColor += specular;\n\
-													}\n\
-													\n\
-													rayColor *= mat.opacity;\n\
-													\n\
-													if(sum(rayColor) > 0.0) {	/* Don\'t bother casting if it\'s just black anyway  */\n\
-														/* TODO: take jittered samples for soft shadows? */\n\
-														rays[++rLast] = Ray(hitPoint,\n\
-															toLight, hit,\n\
-															shLight*rayColor*attenuation,\n\
-															geo.iOR, dist);\n\
+													/* Calculate color from closest intersection */\n\
+													if(EPSILON <= shadow.tLight &&\n\
+														(ray.tLight <= tSh || tSh < EPSILON)) {	/* Light closer or no hit */\n\
+														accColor += shadow.light;\n\
 													}\n\
 												}\n\
 											}\n\
 										}\n\
-									#endif\n\
+									}\n\
 									\n\
-									accColor += shLight*ambient*mat.opacity;\n\
+									accColor += shLight*ambient*material.opacity;\n\
 								}\n\
 								\n\
 								// Reflection\n\
-								vec3 rflLight = geo.reflect*mat.opacity*ray.light;\n\
+								vec3 rflLight = material.reflect*material.opacity*ray.light;\n\
 								if(sum(rflLight) > 0.0) {\n\
-									rays[++rLast] = Ray(hitPoint,\n\
-										reflect(ray.dir, hitNormal), hit\n\
-										rflLight, geo.iOR, -1.0);\n\
+									for(int rl = 0; rl < QUAD_TREE_BUDGET; ++rl) {\n\
+										if(rl > rLast) {\n\
+											rays[rl] = Ray(hit,\n\
+												reflect(ray.dir, hitNormal), h,\n\
+												rflLight, material.iOR, -1.0);\n\
+											\n\
+											rLast = rl;\n\
+											break;\n\
+										}\n\
+									}\n\
 								}\n\
 								\n\
-								// Refraction\n\
-								vec3 rfrLight = (1.0-mat.opacity)*ray.light;\n\
+								// Refraction - TODO: Beer\'s Law - http://www.flipcode.com/archives/Raytracing_Topics_Techniques-Part_3_Refractions_and_Beers_Law.shtml\n\
+								vec3 rfrLight = (1.0-material.opacity)*ray.light;\n\
 								if(sum(rfrLight) > 0.0) {\n\
-									rays[++rLast] = Ray(hitPoint,\n\
-										refract(ray.dir, hitNormal,\n\
-											ray.iOR/geo.iOR),\n\
-										hit, rfrLight, geo.iOR, -1.0);\n\
+									for(int rl = 0; rl < QUAD_TREE_BUDGET; ++rl) {\n\
+										if(rl > rLast) {\n\
+											rays[rl] = Ray(hit,\n\
+												refract(ray.dir, hitNormal,\n\
+													ray.iOR/material.iOR), h,\n\
+												rfrLight, material.iOR, -1.0);\n\
+											\n\
+											rLast = rl;\n\
+											break;\n\
+										}\n\
+									}\n\
 								}\n\
 							}\n\
 						}\n\
@@ -2606,13 +2829,169 @@
 					return accColor;\n\
 				}',
 
+			/* Linear ray tracer (doesn't branch into a tree),
+				handling refractive and shadow rays */
+			refractiveRayTracer:
+				'vec3 traceRays(Ray eyeRay) {\n\
+					vec3 accColor;\n\
+					Ray ray = eyeRay;\n\
+					float meshID;\n\
+					Triangle triangle;\n\
+					vec3 hit;\n\
+					\n\
+					for(int r = 0; r < RAY_BUDGET; ++r) {\n\
+						float t = intersection(ray, 0.0, numMeshes, meshID, triangle, hit);\n\
+						\n\
+						if(inRange(t)) {\n\
+							/* Cast shadow and refraction rays,\n\
+								if the energy is over the threshold */\n\
+							int h = ray.hit+1;\n\
+							\n\
+							mat4 objMat = getObjectMatrix(meshID);\n\
+							hit = (objMat*vec4(hit, 1.0)).xyz;\n\
+							doTransform(triangle, objMat, getNormalMatrix(meshID));\n\
+							\n\
+							/* TODO: get smooth normal - dots \'n\' mixes */\n\
+							vec3 hitNormal = triangle.faceNormal;\n\
+							Material material = getMaterial(meshID);\n\
+							\n\
+							/* Set iOR according to whether leaving or\n\
+								entering material */\n\
+							if(dot(ray.dir, hitNormal) >= 0.0) {\n\
+								material.iOR = MEDIUM_IOR;\n\
+							}\n\
+							\n\
+							// Shadow\n\
+							vec3 shLight = material.opacity*ray.light*\n\
+									(material.ambient+material.diffuse+\n\
+									material.specular);\n\
+							\n\
+							if(sum(shLight) > 0.0) {\n\
+								/* Get the hit color */\n\
+								/* Branching is slow - only do it there\'s a\n\
+									significant chunk of code inside */\n\
+								vec3 ambient = ambientLightColor*material.ambient;\n\
+								\n\
+								for(int l = 0; l < MAX_POINT_LIGHTS; ++l) {\n\
+									vec3 lightColor = pointLightColor[l];\n\
+									\n\
+									if(sum(lightColor) > 0.0) {\n\
+										vec3 toLight = pointLightPosition[l]-hit;\n\
+										float dist = length(toLight);\n\
+										\n\
+										toLight /= dist;\n\
+										\n\
+										vec3 fromLight = -toLight;\n\
+										\n\
+										/* If falloff distance, determine attenuation\n\
+											http://imdoingitwrong.wordpress.com/2011/02/10/improved-light-attenuation/ */\n\
+										float attenuation = 1.0,\n\
+											lightRange = pointLightDistance[l];\n\
+										\n\
+										if(lightRange > 0.0) {\n\
+											float distFactor = dist/\n\
+													(1.0-pow(dist/lightRange, 2.0));\n\
+											\n\
+											attenuation = 1.0/pow(distFactor+1.0, 2.0);\n\
+										}\n\
+										\n\
+										float lightCosAngle = spotLightCosAngle[l];\n\
+										\n\
+										/* If spot light, determine if within spot light cone */\n\
+										if(attenuation > 0.0 &&\n\
+											-1.0 < lightCosAngle && lightCosAngle < 1.0) {	/* In the range [0-180], exclusive - should it be [0, 1]->[90, 0]? (see attenuation with spot falloff) */\n\
+											float cosAngle = dot(fromLight,\n\
+												spotLightDirection[l]);\n\
+											\n\
+											attenuation *= ((lightCosAngle <= cosAngle)?\n\
+												/* Which will result in proper attenuation?\n\
+													http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/\n\
+													http://dl.dropbox.com/u/2022279/OpenGL%20ES%202.0%20Programming%20Guide.pdf */\n\
+												pow(cosAngle, spotLightFalloff[l]) : 0.0);\n\
+												//pow((cosAngle+1.0)*0.5, spotLightFalloff[l]) : 0.0);\n\
+										}\n\
+										\n\
+										if(attenuation > 0.0) {	/* Don\'t bother calculating color or casting if outside of light range */\n\
+											/* Compute the phong shading at the hit\n\
+												Ambient is only accumulated once, so do\n\
+												that outside this loop */\n\
+											vec3 rayColor;\n\
+											\n\
+											vec3 diffuse = material.diffuse*lightColor*\n\
+													max(dot(hitNormal, toLight), 0.0);\n\
+											\n\
+											/* TODO: texturing *//*\n\
+											if(material.textureID >= 0) {\n\
+												vec4 texel = texture2D(textures[material.textureID],\n\
+													getTextureCoord(meshID, hit));\n\
+												\n\
+												diffuse *= texel.rgb*texel.a;\n\
+											}*/\n\
+											\n\
+											rayColor += diffuse;\n\
+											\n\
+											if(sum(material.specular) > 0.0) {\n\
+												vec3 reflection = reflect(toLight, hitNormal);\n\
+												float highlight = max(dot(reflection, ray.dir), 0.0);\n\
+												vec3 specular = material.specular*lightColor*\n\
+														pow(highlight, material.shine);\n\
+												\n\
+												rayColor += specular;\n\
+											}\n\
+											\n\
+											rayColor *= material.opacity;\n\
+											\n\
+											if(sum(rayColor) > 0.0) {	/* Don\'t bother casting if it\'s just black anyway  */\n\
+												/* TODO: take jittered samples for soft shadows? */\n\
+												Ray shadow = Ray(hit,\n\
+													toLight, h,\n\
+													shLight*rayColor*attenuation,\n\
+													material.iOR, dist);\n\
+												\n\
+												float meshIDSh;\n\
+												Triangle triangleSh;\n\
+												vec3 hitSh;\n\
+												\n\
+												float tSh = intersection(shadow,\n\
+														0.0, numMeshes,\n\
+														meshIDSh, triangleSh, hitSh);\n\
+												\n\
+												/* Calculate color from closest intersection */\n\
+												if(EPSILON <= shadow.tLight &&\n\
+													(ray.tLight <= tSh || tSh < EPSILON)) {	/* Light closer or no hit */\n\
+													accColor += shadow.light;\n\
+												}\n\
+											}\n\
+										}\n\
+									}\n\
+								}\n\
+								\n\
+								accColor += shLight*ambient*material.opacity;\n\
+							}\n\
+							\n\
+							// Refraction - TODO: Beer\'s Law - http://www.flipcode.com/archives/Raytracing_Topics_Techniques-Part_3_Refractions_and_Beers_Law.shtml\n\
+							vec3 rfrLight = (1.0-material.opacity)*ray.light;\n\
+							if(ray.hit < maxHits && sum(rfrLight) > 0.0) {\n\
+								ray = Ray(hit, refract(ray.dir, hitNormal,\n\
+										ray.iOR/material.iOR), h,\n\
+									rfrLight, material.iOR, -1.0);\n\
+								\n\
+								rLast++;\n\
+							}\n\
+							else { break; }\n\
+						}\n\
+					}\n\
+					\n\
+					return accColor;\n\
+				}',
+
 			fragmentMain:
 				'void main() {\n\
 					gl_FragColor = vec4(traceRays(Ray(cameraPosition,\n\
 							normalize(pos.xyz-cameraPosition),\n\
-							0, 1.0, MEDIUM_IOR, -1.0)), 1.0);'+
+							0, vec3(1.0), MEDIUM_IOR, -1.0)), 1.0);\n\n'+
 
-					THREE.ShaderChunk["fog_fragment"]+
+					THREE.ShaderChunk["fog_fragment"]+'\n\n'+
 					/* TODO: alter traceRays to write the meshID of the
 						first intersection into a variable, which can then
 						be assigned to the alpha part of the fragment color
@@ -2632,14 +3011,12 @@
 			this.Type.call(this, options);
 			
 			this.health = (options.health || 100);
-			
 			this.state = Entity.states.spawn;
 
 			this.shape = (options.shape || null);
 
 			this.maxForce = (options.maxForce || 0.03);
 			this.maxTorque = (options.maxTorque || 1.0);
-
 			this.restitution = (options.restitution || 0.4);
 
 			this.treeItem = null;
@@ -2686,7 +3063,7 @@
 		
 
 		function Firefly(options) {
-			settings = $.extend(true, {}, Firefly.settings, options);
+			var settings = $.extend(true, {}, Firefly.settings, options);
 			
 			/* Particle entity template */
 			/* TODO: change to Body */
@@ -2694,13 +3071,21 @@
 
 			/* TODO: change to SoftShape (and ensure geometry.dynamic
 				is set to true before passing to mesh) */
+			var geometry = new THREE.SphereGeometry(15, 7, 7);
+
+			// Where is this?
+			//THREE.GeometryUtils.triangulateQuads(geometry);
 			this.shape = new Shape({ owner: this,
-				three: new THREE.Mesh(new THREE.SphereGeometry(15, 7, 7),
-					new THREE.MeshLambertMaterial({ color: 0xffffff,
-						wireframe: true })) });
+					three: new THREE.Mesh(geometry, settings.rayTracerMaterial),
+					material: { reflect: 0.6, iOR: 2.419,
+						density: 1, opacity: 0.3,
+						ambient: new THREE.Color(0x000000),
+						diffuse: new THREE.Color(0xffffff),
+						specular: new THREE.Color(0x888888), shine: 2 } });
 			
-			settings.light.pos = this.pos;
-			//this.light = new SpotLight(settings.light);
+			settings.light.position = new THREE.Vector3(this.pos.x, this.pos.y, 20);
+			settings.light.direction = settings.light.direction.clone();
+			this.light = new SpotLight(settings.light);
 			
 			this.inputForce = null;
 
@@ -2735,7 +3120,12 @@
 		});
 		$.extend(Firefly, {
 			states: $.extend({}, Entity.states, new Enum("wander", "transition")),
-			settings: { mass: 10, light: { rad: 100 } }
+			settings: {
+				mass: 10,
+				light: { rad: 100, hex: 0xffffff, intensity: 1,
+					distance: 50, direction: new THREE.Vector3(0, 0, -1),
+					angle: 80, falloff: 2 }
+			}
 		});
 		
 
@@ -2752,23 +3142,31 @@
 			/* TODO: change to Body */
 			Entity.call(this, Particle, settings);
 
+			var geometry = new THREE.SphereGeometry(8, 5, 5);
+
+			//THREE.GeometryUtils.triangulateQuads(geometry);
 			this.shape = new Shape({ owner: this,
-				three: new THREE.Mesh(new THREE.SphereGeometry(8, 5, 5),
-					new THREE.MeshLambertMaterial({ color: 0xffffff,
-						wireframe: true })) });
+					three: new THREE.Mesh(geometry, settings.rayTracerMaterial),
+					material: { density: 10,
+						ambient: new THREE.Color(0x000000),
+						diffuse: new THREE.Color(0xaa3333),
+						specular: new THREE.Color(0x555555), shine: 3 } });
 
 			this.swarm = settings.swarm;
 			this.wander = settings.wander;
 			this.avoid = settings.avoid;
 			this.swarm.member = this.avoid.point = this;
 
+			// Beware jQuery's shallow copies of non-POJOs
 			for(var influences = [this.swarm, this.wander, this.avoid],
 				i = 0; i < influences.length; ++i) {
 				var influence = influences[i];
 
 				influence.schedule = new Schedule().copy(influence.schedule);
-				influence.force = new Vec2D().copy(influence.force);
+				influence.force = influence.force.copy();
 			}
+
+			this.wander.vel = this.wander.vel.copy();
 			
 			this.state = Predator.states.spawn;
 
@@ -2849,11 +3247,49 @@
 		});
 //	}
 
+//	ENVIRONMENT {
+	function Wall(options) {
+		if(!options) { options = {}; }
+
+		Point.call(this, options.pos);
+
+		this.shape = new Shape({ three: options.three, owner: this });
+		this.shape.three.matrixAutoUpdate = false;
+		this.shape.three.updateMatrix();
+
+		this.glows = options.glows;
+	}
+	inherit(Wall, Point);
+//	}
+
 //	VIEWPORT {
 		function Viewport(options) {
+			// Ensure these are shallow copied
+			var entities = options.entities;
+			if(entities) { delete options.entities; }
+
 			var settings = $.extend(true, {}, Viewport.settings, options);
 
+			settings.entities = options.entities = entities;
+
 			Particle.call(this, settings);
+			
+			this.$container = $(settings.container);
+
+			this.renderer = new THREE.WebGLRenderer({ /*clearAlpha: 1,
+				precision: "highp", */ antialias: true, maxLights: Infinity });
+			
+			/* Require OES_texture_float */
+			if(!this.renderer.getContext().getExtension("OES_texture_float")) {
+				$.error("Error: Requires OES_texture_float extension");
+				// Show some output
+			}
+
+			this.scene = new THREE.Scene();
+			this.scene.fog = new THREE.FogExp2(0xffffff);	// TODO: change to 0x000000
+			this.camera = new THREE.PerspectiveCamera(60, 1, 1, 4000);
+			this.camera.position.z = settings.camera.position.z;
+			this.scene.add(this.camera);
 
 			/* The minimum bounds - defines the resolution and
 				behaviour upon resizes and reorientations, and
@@ -2884,16 +3320,8 @@
 
 			this.renderDone = new Watchable();
 			//this.running = true;
-			
-			this.$container = $(settings.container);
 
-			this.renderer = new THREE.WebGLRenderer({ /*clearAlpha: 1,
-				precision: "highp", */ antialias: true, maxLights: Infinity });
-			this.scene = new THREE.Scene();
-			this.scene.fog = new THREE.FogExp2(0xffffff);
-			this.camera = new THREE.PerspectiveCamera(60, 1, 1, 4000);
-			this.camera.position.z = settings.camera.position.z;
-			this.scene.add(this.camera);
+			if(settings.entities) { this.add(settings.entities); }
 
 			this.resize().reposition();
 
@@ -2926,19 +3354,6 @@
 					:	new Vec2D(this.minRect.size.x, this.minRect.size.y/aspect))
 				.doScale(camSees/this.boundRect.size.y);
 
-				/* DEBUG *//*
-				if(this.plane) { this.scene.remove(this.plane); }
-
-				this.plane = new THREE.Mesh(
-					new THREE.PlaneGeometry(this.boundRect.size.x,
-						this.boundRect.size.y),
-					new THREE.MeshBasicMaterial({ color: 0xff0000,
-						wireframe: true }));
-
-				this.plane.position.x = this.boundRect.pos.x+this.boundRect.size.x/2;
-				this.plane.position.y = this.boundRect.pos.y+this.boundRect.size.y/2;
-				this.scene.add(this.plane);*/
-
 				this.renderer.setSize(width, height);
 				
 				return this;
@@ -2951,10 +3366,6 @@
 
 				this.camera.position.x = this.pos.x;
 				this.camera.position.y = this.pos.y;
-
-				/* DEBUG *//*
-				this.plane.position.x = this.boundRect.pos.x+this.boundRect.size.x/2;
-				this.plane.position.y = this.boundRect.pos.y+this.boundRect.size.y/2;*/
 
 				return this;
 			},
@@ -3000,19 +3411,19 @@
 
 				return this;
 			},
-			addEntity: function(entity) {
+			add: function(entity) {
 				if($.isArray(entity)) {
 					for(var e = 0; e < entity.length; ++e) { this.add(entity[e]); }
 				}
 				else {
 					this.scene.add(entity.shape.three);
 
-					if(entity.light) { this.scene.add(entity.light.three); }
+					if(entity.light) { this.scene.add(entity.light); }
 				}
 
 				return this;
 			},
-			removeEntity: function(entity) {
+			remove: function(entity) {
 				if($.isArray(entity)) {
 					for(var e = 0; e < entity.length; ++e) { this.remove(entity[e]); }
 				}
@@ -3040,7 +3451,8 @@
 				factor: 0.9, restLength: 0, damping: 0.8 },
 			zoomSpringForce: { pointFrom: null, posTo: null,
 				factor: 0.9, restLength: 0, damping: 0.8 },
-			camera: { position: { z: 1000 } }
+			camera: { position: { z: 1000 } },
+			entities: null
 		};
 //	}
 	
@@ -3443,16 +3855,10 @@
 
 				var line = new THREE.Line(geometry,
 						new THREE.LineBasicMaterial({ color: 0xffffff,
-							opacity: 1, linewidth: 3 })),
-					shape = new Shape({
-							three: line,
-							owner: new Particle({ pos: new Vec2D().copy(JSON.position) })
-						});
+							opacity: 1, linewidth: 3 }));
 
-				line.matrixAutoUpdate = false;
-				line.updateMatrix();
-
-				return shape;
+				return new Wall({ three: line,
+						pos: new Vec2D().copy(JSON.position) });
 			}
 		};
 //	}
@@ -3464,39 +3870,61 @@
 			var settings = $.extend(true, {}, Lumens.settings, options);
 
 			this.boundRect = new AARect(null, settings.size);
+
+			Point.call(this, this.boundRect.size.scale(1/2));
+
 			this.toroid = (settings.toroid || false);
 
-			this.walls = new QuadTree(this.boundRect.copy(), 5, 8, settings.walls,
-				function(wall) { return wall.treeItem; });
-			this.swarm = new QuadTree(this.boundRect.copy(), 5, 8, settings.swarm,
-				function(predator) { return predator.treeItem; });
-			
-			this.player = new Firefly({ pos: this.boundRect.size.scale(0.5) });
+			this.walls = new QuadTree(this.boundRect.copy(), 5, 10);
+			this.swarm = new QuadTree(this.boundRect.copy(), 5, 10);
+			// Everything
+			this.entities = new QuadTree(this.boundRect.copy(), 5, 10);
+
+			var center = this.boundRect.size.scale(0.5);
 
 			this.viewport = new Viewport($.extend({
-				springForce: { posTo: this.player.pos },
-				lumens: this, pos: this.player.pos.copy() }, settings.viewport));
+					springForce: { posTo: center },
+					lumens: this, pos: center.copy()
+				},
+				settings.viewport));
+
+			this.rayTracer = new RayTracer({
+				scene: this.viewport.scene,
+				entities: this.entities,
+				budgets: { autoSetup: true, hit: 4,
+					meshes: settings.predators.num+10 }
+			});
 			
-
-			this.plane = new THREE.Mesh(
-				new THREE.PlaneGeometry(this.boundRect.size.x,
-					this.boundRect.size.y),
-				new THREE.MeshBasicMaterial({ color: 0x000000,
-					wireframe: true }));
-
-			this.plane.position.x = this.boundRect.size.x/2;
-			this.plane.position.y = this.boundRect.size.y/2;
-			this.viewport.scene.add(this.plane);
-
-			for(var w = 0; w < this.walls.source.length; ++w) {
-				this.viewport.scene.add(this.walls.source[w].three);
-			}
-
-			this.viewport.addEntity(this.player);
+			var geometry = new THREE.PlaneGeometry(this.boundRect.size.x,
+							this.boundRect.size.y);
+			//THREE.GeometryUtils.triangulateQuads(geometry);
+			this.shape = new Shape({
+					three: new THREE.Mesh(geometry, this.rayTracer.material),
+					material: { reflect: 0.2, opacity: 1,
+						ambient: new THREE.Color(0x000000),
+						diffuse: new THREE.Color(0x555555),
+						specular: new THREE.Color(0x333333), shine: 1 },
+					owner: this
+				});
 			
-			for(var p = 0; p < settings.predators.num; ++p) {
+			this.player = new Firefly({ pos: center,
+					rayTracerMaterial: this.rayTracer.material });
+
+			this.walls.add(settings.walls)
+				.put(function(wall) { return wall.treeItem; });
+			this.swarm.add(settings.swarm)
+				.put(function(predator) { return predator.treeItem; });
+
+			// TODO: remove this
+			while(this.swarm.source.length < settings.predators.num) {
 				this.addPredator();
 			}
+
+			this.entities.add(this.swarm.source.concat(this.walls.source,
+					this.player, this))
+				.put(function(entity) { return entity.treeItem; });
+
+			this.viewport.add(this.entities.source);
 
 			this.controller = Controller.make(this);
 
@@ -3519,7 +3947,7 @@
 
 			requestAnimationFrame(function() { lumens.step(); });
 		}
-		$.extend(Lumens.prototype, {
+		$.extend(inherit(Lumens, Point).prototype, {
 			step: function() {
 				/* TODO: alternating schedule for entity updates/resolutions
 					depending on whether or not they're within a given area
@@ -3539,10 +3967,13 @@
 					
 					/* Resolve everything and populate Quadtrees */
 					for(var r = 0; r < this.swarm.source.length; ++r) {
-						this.swarm.put(this.swarm.source[r]
-							.resolve(dt).treeItem);
+						var rTI = this.swarm.source[r];
+
+						this.entities.clear(rTI);
+						this.swarm.put(rTI.resolve(dt).treeItem);
 					}
 
+					this.entities.clear(this.player.treeItem);
 					this.player.resolve(dt);
 
 					/* Update everything:
@@ -3559,12 +3990,14 @@
 						}
 
 						uE.update(dt);
+						this.entities.put(uE.treeItem);
 					}
 					
 					Collision.Entity.check(this.player, { swarm: this.swarm,
 						walls: this.walls, lumens: this }, dt);
 
 					this.player.update(dt);
+					this.entities.put(this.player.treeItem);
 				}
 
 				/* Render */
@@ -3574,6 +4007,7 @@
 					setTimeout(this.step.call, 1000/60, this);
 				} */
 
+				this.rayTracer.update();
 				this.viewport.render();
 
 				requestAnimationFrame(function() { lumens.step(); });
@@ -3602,20 +4036,22 @@
 							pos: new Vec2D(Math.random()*this.boundRect.size.x,
 								Math.random()*this.boundRect.size.y),
 							angle: new Vec2D(Math.cos(angle),
-									Math.sin(angle))
+									Math.sin(angle)),
+							rayTracerMaterial: this.rayTracer.material
 						});
 				
 				this.swarm.add(predator);
+				this.entities.add(predator);
 
-				this.viewport.addEntity(predator);
+				this.viewport.add(predator);
 
 				return this;
 			},
 			removePredator: function(predator) {
-				this.swarm.source.splice(this.swarm.source.indexOf(predator), 1);
-				// Trees get cleared anyway...
+				this.swarm.remove(predator);	// Swarm tree gets cleared anyway...
+				this.entities.clear(predator).remove(predator);
 
-				this.viewport.removeEntity(predator);
+				this.viewport.remove(predator);
 
 				return this;
 			},
@@ -3797,32 +4233,20 @@
 			gui.remember(lumens);
 			gui.remember(lumens.boundRect.size);
 
+			function onEnvironmentSizeChange() {
+				lumens.viewport.removeEntity(lumens);
+
+				lumens.shape.three = new THREE.Mesh(
+					new THREE.PlaneGeometry(lumens.boundRect.size.x,
+						lumens.boundRect.size.y));
+
+				lumens.shape.pos.copy(lumens.boundRect.size.scale(1/2));
+				lumens.viewport.add(lumens);
+			}
 			environmentFolder.add(lumens.boundRect.size, "x").listen()
-			.onChange(function(w) {
-				lumens.viewport.scene.remove(lumens.plane);
-
-				lumens.plane = new THREE.Mesh(
-					new THREE.PlaneGeometry(w, lumens.boundRect.size.y),
-					new THREE.MeshBasicMaterial({ color: 0x000000,
-						wireframe: true }));
-
-				lumens.plane.position.x = lumens.boundRect.size.x/2;
-				lumens.plane.position.y = lumens.boundRect.size.y/2;
-				lumens.viewport.scene.add(lumens.plane);
-			});
+				.onChange(onEnvironmentSizeChange);
 			environmentFolder.add(lumens.boundRect.size, "y").listen()
-			.onChange(function(h) {
-				lumens.viewport.scene.remove(lumens.plane);
-
-				lumens.plane = new THREE.Mesh(
-					new THREE.PlaneGeometry(lumens.boundRect.size.x, h),
-					new THREE.MeshBasicMaterial({ color: 0x000000,
-						wireframe: true }));
-
-				lumens.plane.position.x = lumens.boundRect.size.x/2;
-				lumens.plane.position.y = lumens.boundRect.size.y/2;
-				lumens.viewport.scene.add(lumens.plane);
-			});
+				.onChange(onEnvironmentSizeChange);
 			environmentFolder.add(lumens, "toroid").listen();
 
 			//gui.close();
