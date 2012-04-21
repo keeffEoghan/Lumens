@@ -1697,6 +1697,7 @@
 
 			this.direction = (options.direction || new THREE.Vector3());
 			this.angle = (options.angle || 0);
+			this.cosAngle = 0;
 
 			this.falloff = (options.falloff || 0.0);	// Exponent determining falloff towards edges of spot
 
@@ -1720,6 +1721,8 @@
 
 				this.treeItem = this.boundRad.containingAARect();
 				this.treeItem.item = this;
+
+				this.cosAngle = Math.cos(this.angle);
 
 				return this;
 			},
@@ -2051,7 +2054,7 @@
 						d[vecOffset++] = light.direction.y;
 						d[vecOffset++] = light.direction.z;
 
-						ca[l] = Math.cos(light.angle);
+						ca[l] = light.cosAngle;
 						a[l] = Math.degrees(light.angle);
 						f[l] = light.falloff;
 					}
@@ -2124,9 +2127,11 @@
 			vertex:
 				// For passing interpolated position to fragment
 				'varying vec4 pos;\n\
+				//varying vec3 norm;\n\
 				\n\
 				void main() {\n\
 					pos = (objectMatrix*vec4(position, 1.0));\n\
+					//norm = (normalMatrix*normal);\n\
 					gl_Position = projectionMatrix*modelViewMatrix*\n\
 							vec4(position, 1.0);\n\
 				}',
@@ -2203,7 +2208,8 @@
 				uniform int maxHits;\n\
 				uniform int maxRays;\n\
 				\n\
-				varying vec4 pos;',
+				varying vec4 pos;\n\
+				//varying vec3 norm;',
 				
 			structs:
 				'struct Ray {\n\
@@ -2318,7 +2324,6 @@
 						texture2D(meshes, vec2(i, j += MESH_DATA_STEP)),\n\
 						texture2D(meshes, vec2(i, j += MESH_DATA_STEP)),\n\
 						texture2D(meshes, vec2(i, j += MESH_DATA_STEP)));\n\
-					/*return mat4(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0);*/\n\
 				}\n\
 				\n\
 				/* Multiply the ray (in world space) by the inverse of the\n\
@@ -2357,7 +2362,6 @@
 					return Material(data[0].r, data[0].g, data[0].b, data[0].a,\n\
 						data[1].rgb,\n\
 						data[2].rgb, int(data[2].a), data[3].rgb, data[3].a);\n\
-					/*return Material(0.0, 0.0, 0.0, 0.0, vec3(0.0), vec3(0.0), 0, vec3(0.0), 0.0);*/\n\
 				}\n\
 				\n\
 				Triangle getTriangle(float index) {\n\
@@ -2393,15 +2397,6 @@
 					t.faceNormal = vec3(n[0].w, n[1].w, n[2].w);	// Passing the face normal this way saves space\n\
 					\n\
 					return t;\n\
-					/*vec3 p[3];\n\
-					p[0] = vec3(0.0);\n\
-					p[1] = vec3(0.0);\n\
-					p[2] = vec3(0.0);\n\
-					vec3 n[3];\n\
-					n[0] = vec3(0.0);\n\
-					n[1] = vec3(0.0);\n\
-					n[2] = vec3(0.0);\n\
-					return Triangle(p, n, vec3(0.0));*/\n\
 				}',
 
 			/* The returned float (t) denotes the distance along
@@ -2498,7 +2493,12 @@
 					but it\'s quicker than doing that for each mesh */\n\
 				float intersection(Ray ray, float meshesIndex, float meshCount,\n\
 					out float meshID, out Triangle triangle, out vec3 hit) {\n\
-					float closest = infinity;\n\
+					float closest = 10.0*infinity/10.0;\n\
+					Triangle dummy;\n\
+					triangle = dummy;\n\
+					meshID = -1.0;\n\
+					hit = vec3(0.0);\n\
+					\n\
 					float mID = meshesIndex;\n\
 					\n\
 					for(float m = 0.0; m < MESHES_BUDGET_F; ++m) {\n\
@@ -2513,18 +2513,18 @@
 								\n\
 								for(float t = 0.0; t < TRIANGLES_BUDGET_F; ++t) {\n\
 									if(t < mesh.triangleCount) {	/* Check for end of list */\n\
-										Triangle tri = getTriangle(tn);\n\
-										vec3 h;\n\
-										float tT = intersection(tRay, tri, h);\n\
-										\n\
-										if(EPSILON <= tT && tT < closest) {\n\
-											closest = tT;\n\
-											meshID = mID;\n\
-											triangle = tri;\n\
-											hit = h;\n\
-										}\n\
-										\n\
-										++tn;\n\
+										// Triangle tri = getTriangle(tn);\n\
+										// vec3 h;\n\
+										// float tT = intersection(tRay, tri, h);\n\
+										// \n\
+										// if(EPSILON <= tT && tT < closest) {\n\
+										// 	closest = tT;\n\
+										// 	meshID = mID;\n\
+										// 	triangle = tri;\n\
+										// 	hit = h;\n\
+										// }\n\
+										// \n\
+										// ++tn;\n\
 									}\n\
 									else { break; }\n\
 								}\n\
@@ -2538,12 +2538,12 @@
 					return closest;\n\
 				}',
 
-			intersectSceneOriginal:
+			intersectScene:
 				'/* Finds the closest intersection along the ray with the\n\
 					entire scene, in object space */\n\
 				float intersection(Ray ray, out float meshID,\n\
 					out Triangle triangle, out vec3 hit) {\n\
-					float closest = infinity;\n\
+					float closest = 10.0*infinity/10.0;\n\
 					Triangle dummy;\n\
 					triangle = dummy;\n\
 					meshID = -1.0;\n\
@@ -2563,108 +2563,39 @@
 					for(int n = 0; n < QUAD_TREE_BUDGET; ++n) {\n\
 						if(n <= nLast && float(n) < numNodes) {\n\
 							Node node = getNode(nodes[n]);\n\
+							bool intersects = inRange(intersection(ray, node.bounds));\n\
 							\n\
-							if(node.numSubNodes > 0.0 || node.meshCount > 0.0) {	/* Check if empty before checking intersection */\n\
-								if(inRange(intersection(ray, node.bounds))) {\n\
-									if(node.numSubNodes > 0.0) {\n\
-										for(int nl = 0; nl < QUAD_TREE_BUDGET; ++nl) {\n\
-											if(nl > nLast) {	/* Super-ugly hack to get the last element in the flat node list, since GLSL ES doesn\'t allow non-constant expressions to be used to index an array (so no "nodes[++nLast] = node.subNodesIndex", which is the nice way to do it) */\n\
-												nodes[nl] = node.subNodesIndex;\n\
-												nodes[nl+1] = node.subNodesIndex+1.0;\n\
-												nodes[nl+2] = node.subNodesIndex+2.0;\n\
-												nodes[nl+3] = node.subNodesIndex+3.0;\n\
-												\n\
-												nodes[nl+4] = -1.0;\n\
-												nLast = nl+4;\n\
-												break;\n\
-											}\n\
-										}\n\
-									}\n\
-									\n\
-									if(node.meshCount > 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\n\
-										float mID;\n\
-										Triangle tri;\n\
-										vec3 h;\n\
-										float mT = intersection(ray, node.meshesIndex,\n\
-												node.meshCount, mID, tri, h);\n\
+							if(intersects && node.numSubNodes > 0.0) {\n\
+								for(int nl = 0; nl < QUAD_TREE_BUDGET; ++nl) {\n\
+									if(nl > nLast) {	/* Super-ugly hack to get the last element in the flat node list, since GLSL ES doesn\'t allow non-constant expressions to be used to index an array (so no "nodes[++nLast] = node.subNodesIndex", which is the nice way to do it) */\n\
+										nodes[nl] = node.subNodesIndex;\n\
+										nodes[nl+1] = node.subNodesIndex+1.0;\n\
+										nodes[nl+2] = node.subNodesIndex+2.0;\n\
+										nodes[nl+3] = node.subNodesIndex+3.0;\n\
 										\n\
-										if(mT < closest) {\n\
-											closest = mT;\n\
-											triangle = tri;\n\
-											meshID = mID;\n\
-											hit = h;\n\
-										}\n\
+										nodes[nl+4] = -1.0;\n\
+										nLast += 4;\n\
+										break;\n\
 									}\n\
+								}\n\
+							}\n\
+							\n\
+							if(intersects && node.meshCount > 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\n\
+								float mID;\n\
+								Triangle tri;\n\
+								vec3 h;\n\
+								float mT = intersection(ray, node.meshesIndex,\n\
+										node.meshCount, mID, tri, h);\n\
+								\n\
+								if(mT < closest) {\n\
+									closest = mT;\n\
+									triangle = tri;\n\
+									meshID = mID;\n\
+									hit = h;\n\
 								}\n\
 							}\n\
 						}\n\
 						else { break; }\n\
-					}\n\
-					\n\
-					return closest;\n\
-				}',
-
-			intersectScene:
-				'/* Finds the closest intersection along the ray with the\n\
-					entire scene, in object space */\n\
-				float intersection(Ray ray, out float meshID,\n\
-					out Triangle triangle, out vec3 hit) {\n\
-					float closest = infinity;\n\
-					Triangle dummy;\n\
-					triangle = dummy;\n\
-					meshID = -1.0;\n\
-					hit = vec3(0.0);\n\
-					\n\
-					/* For the sake of optimisation, loops are extremely\n\
-						primitive in GLSL - only constant values may be used\n\
-						for the LCV, the test must be very simple, and everything\n\
-						seems to need to be figured out at compile time, not\n\
-						run time - hence, set up a budget of the maximum possible\n\
-						number of loops, and break early if not all are needed */\n\
-					float nodes[QUAD_TREE_BUDGET];\n\
-					nodes[0] = 0.0;\n\
-					int nLast = 0;\n\
-					\n\
-					/* Traverse quadTree */\n\
-					for(int n = 0; n < QUAD_TREE_BUDGET; ++n) {\n\
-						// if(n <= nLast && float(n) < numNodes) {\n\
-						// 	Node node = getNode(nodes[n]);\n\
-						// 	\n\
-						// 	if(node.numSubNodes > 0.0 || node.meshCount > 0.0) {	/* Check if empty before checking intersection */\n\
-						// 		if(inRange(intersection(ray, node.bounds))) {\n\
-						// 			if(node.numSubNodes > 0.0) {\n\
-						// 				for(int nl = 0; nl < QUAD_TREE_BUDGET; ++nl) {\n\
-						// 					if(nl > nLast) {	/* Super-ugly hack to get the last element in the flat node list, since GLSL ES doesn\'t allow non-constant expressions to be used to index an array (so no "nodes[++nLast] = node.subNodesIndex", which is the nice way to do it) */\n\
-						// 						nodes[nl] = node.subNodesIndex;\n\
-						// 						nodes[nl+1] = node.subNodesIndex+1.0;\n\
-						// 						nodes[nl+2] = node.subNodesIndex+2.0;\n\
-						// 						nodes[nl+3] = node.subNodesIndex+3.0;\n\
-						// 						\n\
-						// 						nodes[nl+4] = -1.0;\n\
-						// 						nLast = nl+4;\n\
-						// 						break;\n\
-						// 					}\n\
-						// 				}\n\
-						// 			}\n\
-						// 			\n\
-						// 			if(node.meshCount > 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\n\
-						// 				float mID;\n\
-						// 				Triangle tri;\n\
-						// 				vec3 h;\n\
-						// 				float mT = intersection(ray, node.meshesIndex,\n\
-						// 						node.meshCount, mID, tri, h);\n\
-						// 				\n\
-						// 				if(mT < closest) {\n\
-						// 					closest = mT;\n\
-						// 					triangle = tri;\n\
-						// 					meshID = mID;\n\
-						// 					hit = h;\n\
-						// 				}\n\
-						// 			}\n\
-						// 		}\n\
-						// 	}\n\
-						// }\n\
-						// else { break; }\n\
 					}\n\
 					\n\
 					return closest;\n\
@@ -2888,7 +2819,8 @@
 					float meshID;\n\
 					Triangle tri;\n\
 					vec3 hit;\n\
-					float t = 1.0;// = intersection(ray, meshID, tri, hit);\n\
+					//float t = intersection(ray, meshID, tri, hit);	// TODO: remove this intersection, pass each mesh\'s data in uniforms for this instead \n\
+					float t = 1.0;\n\
 					\n\
 					if(inRange(t)) {\n\
 						/* Cast shadow ray, if the energy is over the threshold */\n\
@@ -2939,17 +2871,17 @@
 								float lightCosAngle = spotLightCosAngle[l];\n\
 								\n\
 								/* If spot light, determine if within spot light cone */\n\
-								// if(attenuation > 0.0 && spotLightAngle[l] <= 180.0) {	/* In the range [0-180], exclusive - should it be [0, 1]->[90, 0]? (see attenuation with spot falloff) */\n\
-								// 	float cosAngle = dot(fromLight,\n\
-								// 		spotLightDirection[l]);\n\
-								// 	\n\
-								// 	/* Which will result in proper attenuation?\n\
-								// 		http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/\n\
-								// 		http://dl.dropbox.com/u/2022279/OpenGL%20ES%202.0%20Programming%20Guide.pdf */\n\
-								// 	attenuation *= ceil(cosAngle-lightCosAngle)*\n\
-								// 		pow(cosAngle, spotLightFalloff[l]);\n\
-								// 		//pow((cosAngle+1.0)*0.5, spotLightFalloff[l]);\n\
-								// }\n\
+								//if(attenuation > 0.0 && spotLightAngle[l] <= 180.0) {	/* In the range [0-180], exclusive - should it be [0, 1]->[90, 0]? (see attenuation with spot falloff) */\n\
+								//	float cosAngle = dot(fromLight,\n\
+								//		spotLightDirection[l]);\n\
+								//	\n\
+								//	/* Which will result in proper attenuation?\n\
+								//		http://zach.in.tu-clausthal.de/teaching/cg_literatur/glsl_tutorial/\n\
+								//		http://dl.dropbox.com/u/2022279/OpenGL%20ES%202.0%20Programming%20Guide.pdf */\n\
+								//	attenuation *= ceil(cosAngle-lightCosAngle)*\n\
+								//		pow(cosAngle, spotLightFalloff[l]);\n\
+								//		//pow((cosAngle+1.0)*0.5, spotLightFalloff[l]);\n\
+								//}\n\
 								float cosAngle = dot(fromLight, spotLightDirection[l]);\n\
 								\n\
 								attenuation *= ceil(attenuation)*ceil(180.0-spotLightAngle[l])*\n\
@@ -2989,8 +2921,7 @@
 											shLight*rayColor*attenuation,\n\
 											material.iOR, dist);\n\
 										\n\
-										//t = intersection(ray,\n\
-										//		meshID, triangle, hit);\n\
+										t = intersection(ray, meshID, triangle, hit);\n\
 										\n\
 										/* Calculate color from closest intersection */\n\
 										if(EPSILON <= ray.tLight &&\n\
@@ -3913,7 +3844,7 @@
 			this.walls = new QuadTree(this.boundRect.copy(), 5, 10);
 			this.swarm = new QuadTree(this.boundRect.copy(), 5, 10);
 			// Everything
-			this.entities = new QuadTree(this.boundRect.copy(), 5, 10);
+			this.entities = new QuadTree(this.boundRect.copy(), 4, 10);
 
 			var center = this.boundRect.size.scale(0.5);
 
