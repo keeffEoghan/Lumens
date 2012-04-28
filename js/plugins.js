@@ -238,7 +238,7 @@ var Stats=function(){var h,a,r=0,s=0,i=Date.now(),u=i,t=i,l=0,n=1E3,o=0,e,j,f,b=
 a.style.width="1px",a.style.height=30*Math.random()+"px",a.style.cssFloat="left",a.style.backgroundColor="rgb("+c[0][0]+","+c[0][1]+","+c[0][2]+")",g.appendChild(a);return{getDomElement:function(){return h},getFps:function(){return l},getFpsMin:function(){return n},getFpsMax:function(){return o},getMs:function(){return m},getMsMin:function(){return p},getMsMax:function(){return q},update:function(){i=Date.now();m=i-u;p=Math.min(p,m);q=Math.max(q,m);k.textContent=m+" MS ("+p+"-"+q+")";var a=Math.min(30,
 30-30*(m/200));g.appendChild(g.firstChild).style.height=a+"px";u=i;s++;if(i>t+1E3)l=Math.round(1E3*s/(i-t)),n=Math.min(n,l),o=Math.max(o,l),j.textContent=l+" FPS ("+n+"-"+o+")",a=Math.min(30,30-30*(l/100)),f.appendChild(f.firstChild).style.height=a+"px",t=i,s=0}}};
 
-// ThreeWebGL.js r47 - http://github.com/mrdoob/three.js
+// ThreeWebGL.js r49 - http://github.com/mrdoob/three.js
 'use strict';var THREE=THREE||{};if(!self.Int32Array)self.Int32Array=Array,self.Float32Array=Array;
 (function(){for(var a=0,b=["ms","moz","webkit","o"],c=0;c<b.length&&!window.requestAnimationFrame;++c)window.requestAnimationFrame=window[b[c]+"RequestAnimationFrame"],window.cancelAnimationFrame=window[b[c]+"CancelAnimationFrame"]||window[b[c]+"RequestCancelAnimationFrame"];if(!window.requestAnimationFrame)window.requestAnimationFrame=function(b){var c=(new Date).getTime(),f=Math.max(0,16-(c-a)),h=window.setTimeout(function(){b(c+f)},f);a=c+f;return h};if(!window.cancelAnimationFrame)window.cancelAnimationFrame=
 function(a){clearTimeout(a)}})();THREE.Color=function(a){void 0!==a&&this.setHex(a);return this};
@@ -625,7 +625,10 @@ THREE.ImageUtils={crossOrigin:"",loadTexture:function(a,b,c){var d=new Image,e=n
 Math.sqrt(a[0]*a[0]+a[1]*a[1]+a[2]*a[2]);return[a[0]/b,a[1]/b,a[2]/b]},b=b|1,d=a.width,e=a.height,f=document.createElement("canvas");f.width=d;f.height=e;var h=f.getContext("2d");h.drawImage(a,0,0);for(var i=h.getImageData(0,0,d,e).data,k=h.createImageData(d,e),l=k.data,j=0;j<d;j++)for(var n=1;n<e;n++){var p=0>n-1?e-1:n-1,o=(n+1)%e,m=0>j-1?d-1:j-1,r=(j+1)%d,t=[],z=[0,0,i[4*(n*d+j)]/255*b];t.push([-1,0,i[4*(n*d+m)]/255*b]);t.push([-1,-1,i[4*(p*d+m)]/255*b]);t.push([0,-1,i[4*(p*d+j)]/255*b]);t.push([1,
 -1,i[4*(p*d+r)]/255*b]);t.push([1,0,i[4*(n*d+r)]/255*b]);t.push([1,1,i[4*(o*d+r)]/255*b]);t.push([0,1,i[4*(o*d+j)]/255*b]);t.push([-1,1,i[4*(o*d+m)]/255*b]);p=[];m=t.length;for(o=0;o<m;o++){var r=t[o],y=t[(o+1)%m],r=[r[0]-z[0],r[1]-z[1],r[2]-z[2]],y=[y[0]-z[0],y[1]-z[1],y[2]-z[2]];p.push(c([r[1]*y[2]-r[2]*y[1],r[2]*y[0]-r[0]*y[2],r[0]*y[1]-r[1]*y[0]]))}t=[0,0,0];for(o=0;o<p.length;o++)t[0]+=p[o][0],t[1]+=p[o][1],t[2]+=p[o][2];t[0]/=p.length;t[1]/=p.length;t[2]/=p.length;z=4*(n*d+j);l[z]=255*((t[0]+
 1)/2)|0;l[z+1]=255*(t[1]+0.5)|0;l[z+2]=255*t[2]|0;l[z+3]=255}h.putImageData(k,0,0);return f}};
-// ThreeExtras.js r47 - http://github.com/mrdoob/three.js
+
+
+
+// ThreeExtras.js r49 - http://github.com/mrdoob/three.js
 'use strict';THREE.ColorUtils={adjustHSV:function(a,b,c,d){var f=THREE.ColorUtils.__hsv;THREE.ColorUtils.rgbToHsv(a,f);f.h=THREE.Math.clamp(f.h+b,0,1);f.s=THREE.Math.clamp(f.s+c,0,1);f.v=THREE.Math.clamp(f.v+d,0,1);a.setHSV(f.h,f.s,f.v)},rgbToHsv:function(a,b){var c=a.r,d=a.g,f=a.b,g=Math.max(Math.max(c,d),f),e=Math.min(Math.min(c,d),f);if(e===g)e=c=0;else{var h=g-e,e=h/g,c=(c===g?(d-f)/h:d===g?2+(f-c)/h:4+(c-d)/h)/6;0>c&&(c+=1);1<c&&(c-=1)}void 0===b&&(b={h:0,s:0,v:0});b.h=c;b.s=e;b.v=g;return b}};
 THREE.ColorUtils.__hsv={h:0,s:0,v:0};
 THREE.GeometryUtils={merge:function(a,b){for(var c,d,f=a.vertices.length,g=b instanceof THREE.Mesh?b.geometry:b,e=a.vertices,h=g.vertices,i=a.faces,k=g.faces,j=a.faceVertexUvs[0],m=g.faceVertexUvs[0],p={},n=0;n<a.materials.length;n++)p[a.materials[n].id]=n;if(b instanceof THREE.Mesh)b.matrixAutoUpdate&&b.updateMatrix(),c=b.matrix,d=new THREE.Matrix4,d.extractRotation(c,b.scale);for(var n=0,l=h.length;n<l;n++){var o=new THREE.Vertex(h[n].position.clone());c&&c.multiplyVector3(o.position);e.push(o)}for(n=
