@@ -1,0 +1,338 @@
+/* Like $.extend, first argument is the object to be extended, subsequent
+	arguments are objects which extend it
+	The first argument may also be set to true, indicating a deep extension
+	- in this case, the second object is the object to be extended */
+
+function extend() {
+	var s = 0, deep = arguments[s];
+
+	if(deep === true) { ++s; }
+	else { deep = false; }
+
+	var target = arguments[s++], source;
+
+	for(s; s < arguments.length; ++s) {
+		source = arguments[s];
+		
+		for(var p in source) {
+			var prop = source[p];
+
+			if(deep && prop && prop.constructor && prop.constructor === Object) {
+				if(!target[p]) { target[p] = {}; }
+				arguments.callee(target[p], prop);
+			}
+			else { target[p] = source[p]; }
+		}
+	}
+
+	return target;
+}
+
+
+/* Adapted from John Resig's instanceOf - http://ejohn.org/blog/objectgetprototypeof/ */
+function instance(object, Class) {
+	for(var prototype = Object.getPrototypeOf(object); prototype;
+		prototype = Object.getPrototypeOf(prototype)) {
+		if(prototype === Class.prototype) { return true; }
+	}
+
+	return false;
+}
+
+
+function Vec2D(x, y) { this.x = (x || 0); this.y = (y || 0); }
+$.extend(Vec2D.prototype, {
+	/* Accessors */
+	
+	add: function(other) { return this.copy().doAdd(other); },
+	
+	angleAbs: function(other) {
+		var prodMag = Math.sqrt(this.mag2()*other.mag2());
+		if(magProd) { return Math.acos(this.dot(other)/prodMag); }
+		else { $.error("Vec2D Error: getting angle with zero vector"); }
+	},
+	
+	angleRel: function(other) {
+		return Math.atan2(this.dot(other.perp()), this.dot(other));
+	},
+	
+	copy: function(other) {
+		if(other) { this.x = other.x; this.y = other.y; return this; }
+		else { return new this.constructor(this.x, this.y); }
+	},
+	
+	dist: function(other) { return Math.sqrt(this.distSq(other)); },
+	
+	distSq: function(other) {
+		var x = other.x-this.x, y = other.y-this.y; return x*x+y*y;
+	},
+	
+	dot: function(other) { return this.x*other.x+this.y*other.y; },
+	
+	equals: function(other) {
+		return (this.x === other.x && this.y === other.y);
+	},
+
+	pinToRange: function(min, max) {
+		return this.copy().doPinToRange(min, max);
+	},
+	
+	mag: function() { return Math.sqrt(this.magSq()); },
+	
+	magSq: function() { return this.x*this.x+this.y*this.y; },
+	
+	mult: function(other) { return this.copy().doMult(other); },
+	
+	perp: function() { return this.copy().doPerp(); },
+	
+	scale: function(m) { return this.copy().doScale(m); },
+	
+	sub: function(other) { return this.copy().doSub(other); },
+	
+	unit: function() { return this.copy().doUnit(); },
+	
+	/* Mutators */
+	
+	doAdd: function(other) { this.x += other.x; this.y += other.y; return this; },
+
+	doPinToRange: function(min, max) {
+		if(max < min) { log("Vec2D Warning: max value less than min value"); }
+		var magSq = this.magSq(),
+			limitSq = Math.pinToRange(min*min, magSq, max*max);
+		
+		if(magSq && magSq !== limitSq) {
+			this.doUnit().doScale(Math.sqrt(limitSq));
+		}
+		return this;
+	},
+	
+	doMult: function(other) { this.x *= other.x; this.y *= other.y; return this; },
+	
+	doPerp: function() {
+		// Left
+		var x = this.x; this.x = -this.y; this.y = x; return this;
+	},
+	
+	doScale: function(m) { this.x *= m; this.y *= m; return this; },
+	
+	doSub: function(other) { this.x -= other.x; this.y -= other.y; return this; },
+	
+	doUnit: function() {
+		var mag = this.mag();
+		if(mag) { this.x /= mag; this.y /= mag; return this; }
+		else { $.error("Vec2D Error: normalising zero vector"); }
+	},
+	
+	doZero: function() { this.x = this.y = 0; return this; }
+});
+
+
+/* Conversion functions adapted from Michael Jackson's (really) - http://mjijackson.com/2008/02/rgb-to-hsl-and-rgb-to-hsv-color-model-conversion-algorithms-in-javascript */
+function Color(r, g, b, a) {
+	this.r = (r || 0);
+	this.g = (g || 0);
+	this.b = (b || 0);
+	this.a = (a || 1);
+}
+$.extend(Color.prototype, {
+	fromHSLA: function(h, s, l, a) {
+		h /= 359;
+		s /= 100;
+		l /= 100;
+
+		this.a = a;
+
+		if(s === 0) { this.r = this.g = this.b = l; }
+		else {
+			var hueToRGB = function(p, q, t) {
+				if(t < 0) { ++t; }
+				else if(t > 1) { --t; }
+				
+				return ((t < 1/6)? p+(q-p)*6*t
+					:	((t < 1/2)? q
+					:	((t < 2/3)? p+(q-p)*(2/3-t)*6
+					:	p)));
+			};
+
+			var q = ((l < 0.5)? l*(1+s) : l+s-l*s);
+			var p = 2*l-q;
+			
+			this.r = hueToRGB(p, q, h+1/3);
+			this.g = hueToRGB(p, q, h);
+			this.b = hueToRGB(p, q, h-1/3);
+		}
+		
+		return this;
+	},
+	fromRGBA: function(r, g, b, a) {
+		this.r = r/255; this.g = g/255; this.b = b/255; this.a = a;
+		
+		return this;
+	},
+	toRGBA: function() {
+		return { r: (this.r*255) | 0, g: (this.g*255) | 0,
+			b: (this.b*255) | 0, a: this.a };
+	},
+	toHSLA: function() {
+		var max = Math.max(this.r, this.g, this.b),
+			min = Math.min(this.r, this.g, this.b),
+			h, s, l = (max+min)/2;
+
+		if(max == min){
+			h = s = 0; // achromatic
+		}
+		else {
+			var d = max-min;
+			
+			s = ((l > 0.5) ? d/(2-max-min) : d/(max+min));
+			
+			switch(max){
+				case this.r:
+					h = (this.g-this.b)/d+((this.g < this.b)? 6 : 0);
+				break;
+				case this.g:
+					h = (this.b-this.r)/d+2;
+				break;
+				case this.b:
+					h = (this.r-this.g)/d+4;
+				break;
+			}
+			h /= 6;
+		}
+
+		return { h: (h*360) | 0, s: (s*100) | 0, l: (l*100) | 0, a: this.a };
+	},
+	RGBAString: function() {
+		var rgba = this.toRGBA();
+		return "rgba("+rgba.r+", "+rgba.g+", "+rgba.b+", "+rgba.a+")";
+	},
+	HSLAString: function() {
+		var hsla = this.toHSLA();
+		return "hsla("+hsla.h+", "+hsla.s+", "+hsla.l+", "+hsla.a+")";
+	}
+});
+$.extend(Color, {
+	fromHSLA: function(h, s, l, a) {
+		return (new Color()).fromHSLA(h, s, l, a);
+	},
+	fromRGBA: function(r, g, b, a) {
+		return (new Color()).fromRGBA(r, g, b, a);
+	}
+});
+
+/* RTRT shader stuff */
+
+			intersectSceneOriginal:
+				'/* Finds the closest intersection along the ray with the\n\
+					entire scene, in object space */\n\
+				float intersection(Ray ray, out float meshID,\n\
+					out Triangle triangle, out vec3 hit) {\n\
+					float closest = infinity;\n\
+					Triangle dummy;\n\
+					triangle = dummy;\n\
+					meshID = -1.0;\n\
+					hit = vec3(0.0);\n\
+					\n\
+					/* For the sake of optimisation, loops are extremely\n\
+						primitive in GLSL - only constant values may be used\n\
+						for the LCV, the test must be very simple, and everything\n\
+						seems to need to be figured out at compile time, not\n\
+						run time - hence, set up a budget of the maximum possible\n\
+						number of loops, and break early if not all are needed */\n\
+					float nodes[QUAD_TREE_BUDGET];\n\
+					nodes[0] = 0.0;\n\
+					int nLast = 0;\n\
+					\n\
+					/* Traverse quadTree */\n\
+					for(int n = 0; n < QUAD_TREE_BUDGET; ++n) {\n\
+						if(n <= nLast && float(n) < numNodes) {\n\
+							Node node = getNode(nodes[n]);\n\
+							\n\
+							if(node.numSubNodes > 0.0 || node.meshCount > 0.0) {	/* Check if empty before checking intersection */\n\
+								if(inRange(intersection(ray, node.bounds))) {\n\
+									if(node.numSubNodes > 0.0) {\n\
+										for(int nl = 0; nl < QUAD_TREE_BUDGET; ++nl) {\n\
+											if(nl > nLast) {	/* Super-ugly hack to get the last element in the flat node list, since GLSL ES doesn\'t allow non-constant expressions to be used to index an array (so no "nodes[++nLast] = node.subNodesIndex", which is the nice way to do it) */\n\
+												nodes[nl] = node.subNodesIndex;\n\
+												nodes[nl+1] = node.subNodesIndex+1.0;\n\
+												nodes[nl+2] = node.subNodesIndex+2.0;\n\
+												nodes[nl+3] = node.subNodesIndex+3.0;\n\
+												\n\
+												nodes[nl+4] = -1.0;\n\
+												nLast = nl+4;\n\
+												break;\n\
+											}\n\
+										}\n\
+									}\n\
+									\n\
+									if(node.meshCount > 0.0) {	/* Check at every level to avoid rechecking borderKids by passing them down to each child node */\n\
+										float mID;\n\
+										Triangle tri;\n\
+										vec3 h;\n\
+										float mT = intersection(ray, node.meshesIndex,\n\
+												node.meshCount, mID, tri, h);\n\
+										\n\
+										if(mT < closest) {\n\
+											closest = mT;\n\
+											triangle = tri;\n\
+											meshID = mID;\n\
+											hit = h;\n\
+										}\n\
+									}\n\
+								}\n\
+							}\n\
+						}\n\
+						else { break; }\n\
+					}\n\
+					\n\
+					return closest;\n\
+				}',
+
+
+			intersectMeshes:
+				'/* Finds the closest intersection along the ray with the\n\
+					referenced meshes, in object space - messy to leave the\n\
+					responsibility of transforming back to some other function\n\
+					that didn\'t apply the transformation in the first place,\n\
+					but it\'s quicker than doing that for each mesh */\n\
+				float intersection(Ray ray, float meshesIndex, float meshCount,\n\
+					out float meshID, out Triangle triangle, out vec3 hit) {\n\
+					float closest = 10.0*infinity/10.0;\n\
+					float mID = meshesIndex;\n\
+					\n\
+					for(float m = 0.0; m < MESHES_BUDGET_F; ++m) {\n\
+						if(m < meshCount) {\n\
+							Mesh mesh = getMesh(mID);\n\
+							Ray tRay = transform(ray,\n\
+								getInverseObjectMatrix(mID));\n\
+							\n\
+							if(inRange(intersection(tRay, mesh.boundRad))) {	/* Check mesh bounding radii */\n\
+								/* Check mesh triangles */\n\
+								float tn = mesh.trianglesIndex;\n\
+								\n\
+								for(float t = 0.0; t < TRIANGLES_BUDGET_F; ++t) {\n\
+									if(t < mesh.triangleCount) {	/* Check for end of list */\n\
+										Triangle tri = getTriangle(tn);\n\
+										vec3 h;\n\
+										float tT = intersection(tRay, tri, h);\n\
+										\n\
+										if(EPSILON <= tT && tT < closest) {\n\
+											closest = tT;\n\
+											meshID = mID;\n\
+											triangle = tri;\n\
+											hit = h;\n\
+										}\n\
+										\n\
+										++tn;\n\
+									}\n\
+									else { break; }\n\
+								}\n\
+							}\n\
+							\n\
+							++mID;\n\
+						}\n\
+						else { break; }	/* Check for end of list */\n\
+					}\n\
+					\n\
+					return closest;\n\
+				}',
