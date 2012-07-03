@@ -79,11 +79,179 @@ function safeGet(object, path) {
 		}
 	});
 	
+	/* Strings - RegEx builder at http://gskinner.com/RegExr/ */
+	$.extend(String.prototype, {
+		/* Returns an array of the words contained within a string, split on separating characters */
+		splitWords: function() {
+			return this.split(/[-_\s,]/g);
+			/* The RegEx selects any hyphen or underscore or whitespace */
+		},
+
+		/* Removes spaces and other (unsafe) characters (useful for testing against function parameters) */
+		toSafe: function(spaces) {
+			if(spaces) {
+				return this.replace(/[^ a-z0-9]/gi,'');
+				/* The RegEx selects anything that's not a space, number or letter
+				*   could also use /\W/g to select word characters, but this is more specific */
+			}
+			return this.replace(/[^a-z0-9]/gi,'');
+			/* The RegEx selects anything that's not a number or letter
+			*   could also use /\W/g to select word characters, but this is more specific */
+		},
+
+		/* Removes any characters which are not safe  for display */
+		toDisplaySafe: function() {
+			/* TODO: this */
+			return this;
+		},
+
+		toCamelCase: function(uppercase) {
+			if(uppercase) { /* Alternatively, test for a string value containing case keyword(s), for example, 'upper':  _case !== undefined && /upper/.test(_case.toSafe()) */
+				return this.trim().replace(/(\b[a-z0-9])/gi, function($1) { return $1.toUpperCase(); }).toSafe();
+				/* The RegEx selects the first safe character of each word */
+			}
+			return this.trim().replace(/(?!^[a-z0-9])(\b[a-z0-9])/gi, function($1) { return $1.toUpperCase(); }).toSafe();
+			/* The RegEx selects the first safe character of each word, except the very first */
+		},
+
+		toDashCase: function() {
+			return this.trim().replace(/(?!^[a-z0-9])(\b[a-zA-Z0-9]|[A-Z0-9])/g, function($1) { return "-"+$1.toLowerCase(); });
+			/* The RegEx selects the first safe character of each word, and any uppercase letters or numbers in the words,
+			*	except for the first lowercase letter or number */
+		},
+
+		/* Gets the first character of each word in a string (useful for testing against function parameters) */
+		toAcronym: function() {
+			return this.trim().replace(/(?!\b[a-z0-9])./gi,'');
+			/* The RegEx selects everything but the first (safe) character of each word */
+		}
+		/* NOTE: _underscores still break the RegExs using \b, as they are not considered a word break */
+	});
+	
 	$.extend({
+		/* Creates CSS rules on-the-fly and appends the resulting <style>
+			element to the <head>, applying the styles to elements matching
+			the selectors therein, now and in the future
+			Advantages include queryable, updateable, full CSS (not inline),
+			use of standardised CSS...
+			Best practice: use only when JavaScript is needed to set
+				general CSS rules for a dynamic set of elements (now and
+				in the future), or when general CSS rules themselves need
+				to be dynamic; use an external stylesheet otherwise, as
+				this function is more costly, and changing a value here
+				requires all styles in the same <style> element to be
+				regenerated (which may result in a FOUC (Flash Of
+				Unstyled Content) if no default styles were set elsewhere) */
+		/* TODO: add support for a single call which will set multiple rules at once via a nested object
+			for example:
+			$.cssRules({
+				'selector1': {
+					'property': 'value'
+				},
+				'selector2': {
+					'property': function() { return 'value'; }
+				}
+			}); */
+		cssRules: function(styleMap, id) {
+			/* The ID of the <style> */
+			var styleID = id || 'jquerycssrules',
+				
+				/* Convenience - jQuery object containing the existing
+					<style> element for the rules - replaced at the end */
+				$oldStyle = $('head').find('#'+styleID),
+				
+				/* jQuery object containing the <style> element for the
+					rules - contains a data object 'cssRulesMap'
+					($cssRules.data('cssRulesMap')), which contains the
+					cssRules in a POJO */
+				$style = (($oldStyle.length)?
+					/* Copy the <style> element - for a smooth
+						transition, use the old style as a placeholder,
+						attach the new ones after it, then remove it */
+						$oldStyle.clone(true)
+					:	/* Doesn't exist yet, make a new one */
+						$('<style id="'+styleID+'"></style>')
+							.data('cssRulesMap', {})),
+
+				map = $style.data('cssRulesMap');
+				
+			/* Address each of the possible cases that this function may
+				be called for - either returns map (getter);
+				or calls rule() and appends styles to $cssRules (setter) */
+			
+			/* Getter first - should be fastest */
+			if(styleMap === undefined) { return map; }
+			else {
+				for(var sel in styleMap) {
+					var selector = styleMap[sel];
+
+					for(var prop in selector){
+						var val = selector[prop],
+							value;
+
+						if(typeof val === 'function') {
+							/* Note: only passes the index and CSS property value
+								of the FIRST element in the set, if any -
+								beware when using multiple elements (needs
+								to be this way, can't have different rules
+								in a <style> for each one) */
+							var $elem = $(selector),
+								index = $elem.index(),
+								elemVal = $elem.css(property);
+							
+							/* Use the result of the function, passing
+								the expected context and parameters */
+							value = val.apply($elem, [index, elemVal]);
+						}
+						else { value = val; }
+
+						/* Check for standardisedCss overrides */
+						var p = $.camelCase(prop),
+							std = $.support.standardisedCss,
+							property = ((std && std[p])? std[p] : p);
+						
+						/* Assign the value to the data object and make a new
+							selector property in the cssRulesMap if neccessary */
+						(map[sel] || (map[sel] = {}))[property] = value;
+					}
+				}
+				
+				/* Update the <style> after the data object was changed */
+				var css = '';
+				
+				for(var selectorStr in map) {
+					css += '\n'+selectorStr+' {';
+
+					var selectorObj = map[selectorStr];
+
+					for(var propertyStr in selectorObj){
+						css += '\n	'+propertyStr.toDashCase()+': '+
+								selectorObj[propertyStr]+';';
+					}
+
+					css += '\n}\n';
+				}
+
+				$style.text(css);
+				
+				/* Attach the new rules */
+				if($oldStyle.length) {
+					$oldStyle.prop('id', 'old'+styleID).after($style)
+						.remove();
+				}
+				else {
+					/* Append to the <head> */
+					$oldStyle.end().append($style);
+				}
+
+				return this;
+			}
+		},
+
 		/* Normalises vendor-specific CSS properties
 		*	creates standard CSS properties across browsers
 		*	for properties taking the same values */
-		standardiseCss: function(properties) {
+		standardiseCss: function() {
 			/* TODO: add option to replace exsiting rule
 			*	instead of duplicating */
 			if($.cssHooks && $.support) {
@@ -91,40 +259,38 @@ function safeGet(object, path) {
 					$.support.standardisedCss = {};
 				}
 				
-				var div = document.createElement("div");
+				var std = $.support.standardisedCss,
+					div = document.createElement("div");
 				
-				/* Ensure properties is iteratable */
-				if(!$.isArray(properties) && !$.isPlainObject(properties)) {
-					/* If not, make it an array anyway */
-					properties = [properties];
-				}
-				
-				$.each(properties, function() {
-					var prop = this.toString().toCamelCase(),
-						Prop = prop.toCamelCase(true),
-						WebkitProp = ('Webkit'+Prop).toCamelCase(true),
-						MozillaProp = ('Moz'+Prop).toCamelCase(true),
-						OracleProp = ('O'+Prop).toCamelCase(true);
+				$.each(arguments, function() {
+					var prop = $.camelCase(this.toString()),
+						Prop = $.camelCase("-"+prop),	//prefixed dash ensures cap first letter
+						WebkitProp = ('Webkit'+Prop),
+						MozillaProp = ('Moz'+Prop),
+						MSProp = ('Ms'+Prop),
+						OracleProp = ('O'+Prop);
 
-					$.support.standardisedCss[prop] =
+					std[prop] =
 						((div.style[WebkitProp] === '')? WebkitProp
 						:	((div.style[MozillaProp] === '')? MozillaProp
 						:	((div.style[OracleProp] === '')? OracleProp
-						:	((div.style[prop] === '')? prop
+						:	((div.style[MsProp] === '')? MsProp
 						:	false))));
 
-					/* Only create CSS hook if property is not already supported as-is */
-					if($.support.standardisedCss[prop] && $.support.standardisedCss[prop] != prop) {
+					/* Only create CSS hook if property is supported
+						and vendor-prefixed */
+					if(std[prop]) {
 						$.cssHooks[prop] = {
-							get: function(elem,computed,extra) {
-								return $.css(elem,$.support.standardisedCss[prop]);
+							get: function(elem, computed, extra) {
+								return $.css(elem, std[prop]);
 							},
-							set: function(elem,value) {
-								elem.style[$.support.standardisedCss[prop]] = value;
+							set: function(elem, value) {
+								elem.style[std[prop]] = value;
 							}
 						};
 					}
 				});
+
 				return this;
 			}
 			else {
