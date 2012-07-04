@@ -42,8 +42,8 @@ body { margin: 0; font-size: 1em; line-height: 1.4; }
  * Also: hot pink! (or customize the background color to match your design)
  */
 
-::-moz-selection { background: #fe57a1; color: #fff; text-shadow: none; }
-::selection { background: #fe57a1; color: #fff; text-shadow: none; }
+::-moz-selection { background: hsl(0, 80%, 50%); color: #fff; text-shadow: none; }
+::selection { background: hsl(0, 80%, 50%); color: #fff; text-shadow: none; }
 
 
 /* =============================================================================
@@ -217,9 +217,16 @@ td { vertical-align: top; }
    Author: Eoghan O'Keeffe
    ========================================================================== */
 
+@font-face {
+  font-family: 'League Gothic';
+  src: url('../fonts/leaguegothic/league_gothic-webfont.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+}
+
 html {
   height: 100%;
-  background: hsl(217, 31%, 15%);
+  background: hsl(217, 10%, 10%);
   color: hsl(0, 0%, 100%);
 }
 
@@ -231,11 +238,125 @@ body {
   overflow: hidden;
 }
 
-#main { height: 100%; }
+#main {
+  z-index: 1;
+  height: 100%;
+}
 
-#lumens {
+#lumens, #overlay {
   width: 100%;
   height: 100%;
+}
+
+#overlay {
+  text-align: center;
+  position: absolute;
+  background: hsl(0, 0%, 0%);
+  text-shadow: 0px 0px 20px hsl(0, 0%, 80%);
+  padding: 0%;
+  z-index: 2;
+}
+
+#overlay > header {
+  position: absolute;
+  text-align: right;
+  line-height: normal;
+  top: 0;
+  right: 75%;
+  min-width: 25%;
+}
+
+#overlay > footer {
+  position: absolute;
+  text-align: left;
+  line-height: normal;
+  bottom: 0;
+  left: 75%;
+  min-width: 25%;
+}
+
+#scroller {
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  overflow: auto;
+}
+
+#info {
+  text-align: left;
+  width: 50%;
+  max-width: 60em;
+  margin: 100px auto;
+  padding: 0 5%;
+}
+
+#start, h1, h2, h3, h4, h5, h6 {
+  color: hsl(0, 0%, 100%);
+  font-family: 'League Gothic', sans-serif;
+}
+
+.csstransitions #overlay > header, .csstransitions #overlay > footer,
+.csstransitions #info {
+  opacity: 0;
+  text-shadow: none;
+}
+
+.csstransitions #start {
+  text-shadow: none;
+}
+
+h1 {
+  font-size: 65px;
+}
+
+ul { list-style: none; }
+
+ul.closed {
+  max-height: 0px;
+  overflow: hidden;
+}
+
+li {
+  padding-left: 1em;
+  text-indent: -1em;
+}
+
+li:before { content: "\2014 \0020"; }
+
+#start {
+  font-size: 50px;
+  position: relative;
+  cursor: pointer;
+  background: transparent;
+  color: hsl(0, 80%, 50%);
+  text-shadow: 0px 0px 10px hsl(0, 90%, 50%);
+  border-radius: 5px;
+  border: none;
+}
+
+#start:hover {
+  text-shadow: 0px 0px 40px hsl(0, 100%, 50%);
+  box-shadow: 0px 0px 30px hsl(0, 90%, 50%);
+}
+
+.no-webgl #start {
+  cursor: not-allowed;
+  color: hsl(0, 5%, 50%);
+}
+
+strong {
+  color: hsl(0, 80%, 50%);
+  text-shadow: 0px 0px 20px hsl(0, 80%, 50%);
+}
+
+a {
+  color: hsl(210, 90%, 50%);
+  text-shadow: 0px 0px 20px hsl(210, 90%, 50%); 
+}
+
+a:visited {
+  color: hsl(270, 90%, 60%);
+  text-shadow: 0px 0px 20px hsl(270, 90%, 60%); 
 }
 
 /* ==|== media queries ======================================================
