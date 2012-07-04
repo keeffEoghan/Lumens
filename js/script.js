@@ -3618,7 +3618,7 @@
 
 						var pause = function(paused) {
 							$("#overlay").toggleClass("fade hidden", !paused);
-							$("#main").toggleClass("hidden", paused);
+							//$("#main").toggleClass("hidden", paused);
 						};
 
 						instance.controller.events.pause.watch(pause);
