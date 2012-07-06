@@ -8,12 +8,12 @@ window.log = function f(){ log.history = log.history || []; log.history.push(arg
 
 
 /* Standardise requestAnimationFrame */
-if(!window.requestAnimationFrame) {
-	window.requestAnimationFrame =
-		webkitRequestAnimationFrame ||
-		mozRequestAnimationFrame ||
-		oRequestAnimationFrame ||
-		msRequestAnimationFrame ||
+if(!self.requestAnimationFrame) {
+	self.requestAnimationFrame =
+		self.webkitRequestAnimationFrame ||
+		self.mozRequestAnimationFrame ||
+		self.oRequestAnimationFrame ||
+		self.msRequestAnimationFrame ||
 		/*  Fallback to setTimeout function */
 		function(callback, element) {
 			setTimeout(callback, 1000/60, Date.now());
