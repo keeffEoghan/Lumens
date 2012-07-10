@@ -281,6 +281,8 @@ body {
   overflow: auto;
 }
 
+.touch #scroller { -webkit-overflow-scrolling : touch; }
+
 #info {
   text-align: left;
   width: 50%;
