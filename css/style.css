@@ -260,7 +260,6 @@ body {
 
 #overlay > header, #overlay > footer {
   position: absolute;
-  position: fixed;
   line-height: normal;
 }
 
