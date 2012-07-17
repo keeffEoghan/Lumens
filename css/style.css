@@ -258,18 +258,20 @@ body {
   z-index: 20000;
 }
 
-#overlay > header {
+#overlay > header, #overlay > footer {
   position: absolute;
-  text-align: right;
+  position: fixed;
   line-height: normal;
+}
+
+#overlay > header {
+  text-align: right;
   top: 0;
   right: 75%;
 }
 
 #overlay > footer {
-  position: absolute;
   text-align: left;
-  line-height: normal;
   bottom: 0;
   left: 75%;
 }
@@ -291,6 +293,21 @@ body {
   padding: 0 5%;
 }
 
+#info > div {
+  overflow: hidden;
+  opacity: 1;
+  height: auto;
+}
+
+#info > div.closed {
+  height: 0px;
+  opacity: 0;
+}
+
+#info > h2 {
+  cursor: pointer;
+}
+
 #start, #overlay h1, #overlay h2, #overlay h3, #overlay h4,
 #overlay h5, #overlay h6 {
   color: hsl(0, 0%, 100%);
@@ -307,37 +324,32 @@ body {
   text-shadow: none;
 }
 
-#overlay h1 {
+header h1 {
   font-size: 65px;
+  text-shadow: 0px 0px 80px white, 0px 0px 20px hsla(0, 0%, 100%, 0.8);
 }
 
-#overlay ul { list-style: none; }
+#info ul { list-style: none; }
 
-#overlay ul.closed {
-  max-height: 0px;
-  overflow: hidden;
-}
-
-#overlay li {
+#info li {
   padding-left: 1em;
   text-indent: -1em;
 }
 
-#overlay li:before { content: "\2014 \0020"; }
+#info li:before { content: "\2014 \0020"; }
 
 #start {
   font-size: 50px;
-  position: relative;
   cursor: pointer;
   background: transparent;
   color: hsl(0, 80%, 50%);
-  text-shadow: 0px 0px 10px hsl(0, 90%, 50%);
+  text-shadow: 0px 0px 20px hsl(0, 90%, 50%);
   border-radius: 5px;
   border: none;
 }
 
 #start:hover {
-  text-shadow: 0px 0px 40px hsl(0, 100%, 50%);
+  text-shadow: 0px 0px 30px hsl(0, 100%, 50%) !important;
   box-shadow: 0px 0px 30px hsl(0, 90%, 50%);
 }
 
