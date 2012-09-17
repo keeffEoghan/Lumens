@@ -3,67 +3,7 @@
 
 (function($) {
 //	STYLE {
-		$.standardiseCss("transform-origin", "transform", "transition",
-			"text-stroke", "text-fill-color");
-
-		if(Modernizr.csstransforms) {
-			$.cssRules({
-				"#overlay > header": {
-					"transform-origin": "100% 100%",
-					"transform": "translatey(-150px) rotate(-90deg)"
-				},
-				"#overlay > footer": {
-					"transform-origin": "0% 100%",
-					"transform": "translatey(-100px) rotate(90deg)"
-				},
-				"header h1": {
-					"text-stroke": "1.5px white",
-					"text-fill-color": "transparent"
-				},
-				"#start": {
-					"text-stroke": "1.5px hsl(0, 80%, 50%)",
-					"text-fill-color": "transparent"
-				}
-			});
-
-			if(Modernizr.csstransitions) {
-				$(function() {
-					setTimeout(function() {
-						$.cssRules({
-							"#overlay > header, #info, #overlay > footer": {
-								"opacity": "1 !important",
-								"text-shadow": "0px 0px 20px hsl(0, 0%, 80%) !important"
-							},
-							"#overlay > header": {
-								"transition": "opacity 1s ease-in,\
-									text-shadow 2s ease-in"
-							},
-							"#info": {
-								"transition": "opacity 1s ease-in 0.4s,\
-									text-shadow 2s ease-in 0.4s"
-							},
-							"#overlay > footer": {
-								"transition": "opacity 1s ease-in 0.8s,\
-									text-shadow 2s ease-in 0.8s"
-							},
-							"#start": {
-								"transition": "box-shadow 1.2s ease-in-out 0.2s,\
-									text-shadow 0.5s ease-in-out",
-								"text-shadow": "0px 0px 10px hsl(0, 90%, 50%) !important"
-							},
-							"#overlay": { "transition": "all 1s ease-in" },
-							"#overlay.fade": {
-								"transform": "scale(1.2)",
-								"opacity": "0"
-							},
-							"#info > div": {
-								"transition": "all 0.6s ease-in-out"
-							}
-						});
-					}, 200);
-				});
-			}
-		}
+		$(function() { $("body").removeClass("loading"); });
 //	}
 
 //	UTIL {
@@ -3664,9 +3604,9 @@
 			}
 		:	function() {
 				alert("You need a browser with WebGL support\n\
-					Visit get.webgl.org or browsehappy.com for more information");
+					Visit get.webgl.org or browsehappy.com for more");
 			}))
 		.on("click.lumens", "#info > h2", function() {
-			$(this).next("div").toggleClass("closed");
+			$(this).next("section").toggleClass("closed");
 		});
 })(jQuery);
