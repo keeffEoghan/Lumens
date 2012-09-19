@@ -352,7 +352,9 @@ body {
   overflow: auto;
 }
 
-.touch #scroller { -webkit-overflow-scrolling : touch; }
+.touch #scroller {
+  -webkit-overflow-scrolling: touch;
+}
 
 #info {
   height: 100%;

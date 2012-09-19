@@ -50,6 +50,9 @@
               <li>Emergent artificial intelligence, with swarming and obstacle evasion behaviours</li>
             </ul>
             <p>
+              It was nominated for the 2012 Sun Life Enterprise and Innovation Awards.
+            </p>
+            <p>
               Light is simulated on the GPU, with the lighting algorithm coded in shaders.<br/>
               The scene is dynamic, and so the global data required for ray-tracing is passed to the GPU at every frame.  Supporting this required a very efficient means of passing data - the global data is encoded into WebGL textures according to a custom architecture, passed as uniforms, and parsed on the GPU for use in the lighting algorithm.<br/>
               The initial Whitted-style ray-tracer (after proving too complex for the highly optimised GLSL ES) had to be greatly simplified in order to work; and is now a dynamic shadow-caster supporting some primitive geometry.<br/>
