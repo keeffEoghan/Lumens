@@ -305,7 +305,6 @@ body {
   margin: 0 auto;
   width: 100%;
   height: 100%;
-  min-width: 600px;
   position: relative;
   overflow: hidden;
 }
@@ -337,9 +336,29 @@ body {
   text-align: right;
   top: 0;
   right: 75%;
+  -webkit-transform-origin: 100% 100%;
+  -moz-transform-origin: 100% 100%;
+  -ms-transform-origin: 100% 100%;
+  -o-transform-origin: 100% 100%;
+  transform-origin: 100% 100%;
+  -webkit-transform: translatey(-5em) rotate(-90deg);
+  -moz-transform: translatey(-5em) rotate(-90deg);
+  -ms-transform: translatey(-5em) rotate(-90deg);
+  -o-transform: translatey(-5em) rotate(-90deg);
+  transform: translatey(-5em) rotate(-90deg);
 }
 
 #overlay > footer {
+  -webkit-transform-origin: 0% 100%;
+  -moz-transform-origin: 0% 100%;
+  -ms-transform-origin: 0% 100%;
+  -o-transform-origin: 0% 100%;
+  transform-origin: 0% 100%;
+  -webkit-transform: translatey(-10em) rotate(90deg);
+  -moz-transform: translatey(-10em) rotate(90deg);
+  -ms-transform: translatey(-10em) rotate(90deg);
+  -o-transform: translatey(-10em) rotate(90deg);
+  transform: translatey(-10em) rotate(90deg);
   text-align: left;
   bottom: 0;
   left: 75%;
@@ -348,6 +367,7 @@ body {
 #scroller {
   width: 100%;
   height: 100%;
+  max-width: 100%;
   max-height: 100%;
   overflow: auto;
 }
@@ -359,15 +379,21 @@ body {
 #info {
   height: 100%;
   width: 50%;
-  max-width: 60em;
+  min-width: 20em;
+  max-width: 65em;
   margin: 0 auto;
-  padding: 100px 5%;
+  padding: 4em 5%;
 }
 
 #info > section {
   overflow: auto;
   opacity: 1;
   max-height: 100%;
+  -webkit-transition: all 0.6s ease-in-out;
+  -moz-transition: all 0.6s ease-in-out;
+  -ms-transition: all 0.6s ease-in-out;
+  -o-transition: all 0.6s ease-in-out;
+  transition: all 0.6s ease-in-out;
 }
 
 #info > .closed {
@@ -397,35 +423,23 @@ body {
   text-fill-color: transparent;
 }
 
-#overlay > header {
-  -webkit-transform-origin: 100% 100%;
-  -moz-transform-origin: 100% 100%;
-  -ms-transform-origin: 100% 100%;
-  -o-transform-origin: 100% 100%;
-  transform-origin: 100% 100%;
-  -webkit-transform: translatey(-15em) rotate(-90deg);
-  -moz-transform: translatey(-15em) rotate(-90deg);
-  -ms-transform: translatey(-15em) rotate(-90deg);
-  -o-transform: translatey(-15em) rotate(-90deg);
-  transform: translatey(-15em) rotate(-90deg);
-}
-
-#overlay > footer {
-  -webkit-transform-origin: 0% 100%;
-  -moz-transform-origin: 0% 100%;
-  -ms-transform-origin: 0% 100%;
-  -o-transform-origin: 0% 100%;
-  transform-origin: 0% 100%;
-  -webkit-transform: translatey(-10em) rotate(90deg);
-  -moz-transform: translatey(-10em) rotate(90deg);
-  -ms-transform: translatey(-10em) rotate(90deg);
-  -o-transform: translatey(-10em) rotate(90deg);
-  transform: translatey(-10em) rotate(90deg);
+header > h1, footer > h1 {
+  margin: 0;
 }
 
 header > h1 {
   font-size: 6em;
   text-shadow: 0px 0px 80px white, 0px 0px 20px hsla(0, 0%, 100%, 0.8);
+}
+
+.loading header > h1:after {
+  content: "<loading>";
+  text-transform: uppercase;
+  font-size: 0.4em;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  opacity: 0.6;
 }
 
 .loading #overlay > footer,
@@ -438,19 +452,19 @@ header > h1 {
   text-shadow: none;
 }
 
-#overlay > header, #info, #overlay > footer {
+#info, #overlay > footer {
   opacity: 1;
   text-shadow: 0px 0px 20px hsl(0, 0%, 80%) !important;
-  -webkit-transition: opacity 1s ease-in,
-    text-shadow 2s ease-in;
-  -moz-transition: opacity 1s ease-in,
-    text-shadow 2s ease-in;
-  -ms-transition: opacity 1s ease-in,
-    text-shadow 2s ease-in;
-  -o-transition: opacity 1s ease-in,
-    text-shadow 2s ease-in;
-  transition: opacity 1s ease-in,
-    text-shadow 2s ease-in;
+  -webkit-transition: opacity 1s ease-in 0.2s,
+    text-shadow 2s ease-in 0.2s;
+  -moz-transition: opacity 1s ease-in 0.2s,
+    text-shadow 2s ease-in 0.2s;
+  -ms-transition: opacity 1s ease-in 0.2s,
+    text-shadow 2s ease-in 0.2s;
+  -o-transition: opacity 1s ease-in 0.2s,
+    text-shadow 2s ease-in 0.2s;
+  transition: opacity 1s ease-in 0.2s,
+    text-shadow 2s ease-in 0.2s;
 }
 
 #overlay > footer {
@@ -507,14 +521,6 @@ header > h1 {
   -o-transform: scale(1.2);
   transform: scale(1.2);
   opacity: 0;
-}
-
-#info > div {
-  -webkit-transition: all 0.6s ease-in-out;
-  -moz-transition: all 0.6s ease-in-out;
-  -ms-transition: all 0.6s ease-in-out;
-  -o-transition: all 0.6s ease-in-out;
-  transition: all 0.6s ease-in-out;
 }
 
 #info ul { list-style: none; }

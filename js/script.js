@@ -3,7 +3,7 @@
 
 (function($) {
 //	STYLE {
-		$(function() { $("body").removeClass("loading"); });
+		$(document).on('ready.lumens', function() { $("body").removeClass("loading"); });
 //	}
 
 //	UTIL {
