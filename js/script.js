@@ -2127,7 +2127,7 @@
 					return closest;\n\
 				}',
 
-			/* Similarly to the secene intersection, the lighting algorithm
+			/* Similarly to the scene intersection, the lighting algorithm
 				also had to be simplified to work.  This entailed a reduction
 				from a whitted ray-tracer with shadows, reflection,
 				refraction, and multiple bounces; to a shadow-caster

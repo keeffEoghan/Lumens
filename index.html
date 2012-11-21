@@ -32,7 +32,7 @@
   <body class="loading">
     <!-- Prompt IE 6 users to install Chrome Frame. Remove this if you support IE 6.
     chromium.org/developers/how-tos/chrome-frame-getting-started -->
-    <!--[if lt IE 7]><p class=chromeframe>Your browser is <em>ancient!</em> <a href="http://browsehappy.com/">Upgrade to a different browser</a> or <a href="http://www.google.com/chromeframe/?redirect=true">install Google Chrome Frame</a> to experience this site.</p><![endif]-->
+    <!--[if lt IE 7]><p class=chromeframe>Sorry, but your browser won't be able to run this application.  You can <a href="http://browsehappy.com/" target="_blank">upgrade to a different browser</a> or <a href="http://www.google.com/chromeframe/?redirect=true" target="_blank">install Google Chrome Frame</a> to experience this site.</p><![endif]-->
     <header></header>
 
     <section id="overlay">
@@ -42,27 +42,34 @@
           <h2>WHAT<strong>?</strong></h2>
           <section>
             <p>
-              This is an experimental project - the basis of a concept for a future game - exploring a few areas of interest:
+              First things first - <strong>please read the brief notes in the <a href="#disclaimer">disclaimer</a> before hitting start</strong>. It could save your life... or some mild annoyance, anyway.<br/>
+            </p>
+            <p>
+            <p>
+              This is an experimental project, a proof of concept for a future game, and an excuse to explore a few areas of interest:
             </p>
             <ul>
               <li>Real-time dynamic ray-tracing in WebGL</li>
               <li>Physics and collision engine</li>
-              <li>Emergent artificial intelligence, with swarming and obstacle evasion behaviours</li>
+              <li>Emergent artificial intelligence for large numbers of entities, with <a href="www.red3d.com/cwr/boids/" target="_blank">swarming</a> and obstacle evasion behaviours</li>
             </ul>
-            <p>
-              It was nominated for the 2012 Sun Life Enterprise and Innovation Awards.
+              Light is simulated on the GPU, with the lighting algorithm coded in shaders (using <a href="http://mrdoob.github.com/three.js/" target="_blank">three.js</a>).<br/>
+              The scene is dynamic, and so the global data required for ray-tracing is passed to the GPU at every frame.  Supporting this required a very efficient means of passing data - the global data is encoded into WebGL textures according to a custom architecture, passed as uniforms, and parsed on the GPU for use in the lighting algorithm.<br/>
+              The initial Whitted-style ray-tracer (after proving too complex for the highly optimised GLSL ES) had to be greatly simplified; and is now a dynamic shadow-caster supporting simple geometry.
             </p>
             <p>
-              Light is simulated on the GPU, with the lighting algorithm coded in shaders.<br/>
-              The scene is dynamic, and so the global data required for ray-tracing is passed to the GPU at every frame.  Supporting this required a very efficient means of passing data - the global data is encoded into WebGL textures according to a custom architecture, passed as uniforms, and parsed on the GPU for use in the lighting algorithm.<br/>
-              The initial Whitted-style ray-tracer (after proving too complex for the highly optimised GLSL ES) had to be greatly simplified in order to work; and is now a dynamic shadow-caster supporting some primitive geometry.<br/>
-              <br/>
-              The concept requires very large numbers of entities at once - a quad tree space partitioning data structure greatly improves the performance of physics, collision, artificial intelligence, and (in future versions) ray-tracing.<br/>
-              <br/>
+              Very large numbers of entities populate the environment - a quad tree space partitioning data structure greatly improves the performance of physics, collision, artificial intelligence, and (in future versions) ray-tracing.
+            </p>
+            <p>
               The game concept will cast the player as a light-emitting entity, navigating a pitch dark environment – home to swarms of glowing predators seeking out sources of light which they feed upon.<br/>
-              Use stealth, speed, and accuracy to outmanoeuvre the unpredictable swarms; stealthily lure away and pick off individuals without being discovered by overwhelming numbers.<br/>Darkness conceals threats, traps and dead-ends; light betrays you to your hunters.<br/>
-              <br/>
+              Use stealth, speed, and accuracy to outmanoeuvre the unpredictable swarms; stealthily lure away and pick off individuals without being discovered by overwhelming numbers.<br/>
+              Darkness conceals threats, traps and dead-ends; light betrays you to your hunters.
+            </p>
+            <p>
               For further details, see the <a href="https://github.com/keeffEoghan/Lumens" target="_blank">GitHub page</a>.
+            </p>
+            <p>
+              <em>Nominated for the 2012 Sun Life Enterprise and Innovation Awards</em>
             </p>
           </section>
           <h2>HOW<strong>?</strong></h2>
@@ -74,18 +81,20 @@
           <h2>WHO<strong>?</strong></h2>
           <section>
             <p>
-              Eoghan O'Keeffe. I'm a software developer with a background in art; I enjoy making interesting things.<br/>If you'd like to chat, just <a href="mailto:keeffeoghan@gmail.com">get in touch</a>.
+              Eoghan O'Keeffe. I'm a software developer, with a background in art. I enjoy making interesting things.<br/>
+              At the time of writing, I'd just finished my time in the insulating bubble of college, and plunged back to reality.<br/>
+              If you'd like to chat, just <a href="mailto:keeffeoghan@gmail.com">get in touch</a>; or if you'd like to find out more about me, my <a href="http://ie.linkedin.com/pub/eoghan-o-keeffe/27/a97/9a9" target="_blank">LinkedIn</a> is a good place to start.
             </p>
           </section>
-          <h2>DISCLAIMER<strong>...</strong></h2>
+          <h2 id="disclaimer">DISCLAIMER<strong>...</strong></h2>
           <section>
             <p>
               This is currently an <strong>experimental</strong> (rather than fully-fledged and friendly) application:
               <ul>
                 <li>It requires a <strong>modern browser</strong> supporting <strong>WebGL</strong>, and a decent <strong>graphics card</strong></li>
                 <li>The shaders might take a while to compile, so you may need to <strong>wait</strong></li>
-                <li>It could take a sizeable chunk out of your machine's <strong>performance</strong> while running (try closing other tabs and processes for better results in this case)</li>
-                <li>Too many entities being involved could even cause it to <strong>crash altogether</strong> (if this happens, the application will become unresponsive, and may require a restart of your browser or even your machine)</li>
+                <li>It could take up a sizeable chunk of your machine's <strong>performance</strong> while running (try closing other tabs and processes for better results in this case)</li>
+                <li>Too many entities being involved could even cause it to <strong>crash altogether</strong> (if this happens, the application will become unresponsive, and may require a restart of your browser or even your machine) - please add enemies slowly at first</li>
               </ul>
               So, bear all that in mind, and enjoy.
             </p>
