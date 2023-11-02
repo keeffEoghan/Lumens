@@ -1,3 +1,5 @@
+![Lumens screenshot](documents/Poster/Screen.png)
+
 Lumens is a strategic action game, with real-time ray-tracing and emergent AI; a physics engine supporting collision detection and resolution, particle and rigid body motion, and soft-body dynamics; and generated environments and audio.
 Developed as a final year college project, it is an experimental web application targeting modern, WebGL-enabled browsers.
 
